@@ -8,12 +8,20 @@
 
 #include "flatbuffers/base.h"
 #include "flatbuffers/code_generators.h"
-//#include "flatbuffers/flatbuffers.h"
-//#include "flatbuffers/flatc.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 
 namespace flatbuffers {
+
+// Make the string upper case
+static inline std::string ToUpper(std::string val) {
+  std::locale loc;
+  auto &facet = std::use_facet<std::ctype<char>>(loc);
+  facet.toupper(&val[0], &val[0] + val.length());
+  return val;
+}
+
+
 
 namespace gdscript {
 
@@ -159,11 +167,6 @@ class GdscriptGenerator : public BaseGenerator {
     return "VT_" + uname;
   }
 
-  std::string GenEnumValDecl(const EnumDef &enum_def,
-                             const std::string &enum_val) const {
-    return opts_.prefixed_enums ? Name(enum_def) + "_" + enum_val : enum_val;
-  }
-
   // Generate an enum declaration,
   // an enum string lookup table,
   // and an enum array of values
@@ -171,15 +174,8 @@ class GdscriptGenerator : public BaseGenerator {
   void GenEnum(const EnumDef &enum_def) {
     code_.SetValue("ENUM_NAME", Name(enum_def));
 
-    /*
-     * FIXME TODO I need to change the generation of the enums
-     *  * Make all the enums scoped
-     *  * Make all the headings uppercase
-     */
-
     GenComment(enum_def.doc_comment);
-
-    code_ += "enum\\";
+    code_ += "enum " + Name(enum_def) + "\\";
     code_ += " {";
 
     code_.SetValue("SEP", ",");
@@ -187,7 +183,7 @@ class GdscriptGenerator : public BaseGenerator {
     for (const auto ev : enum_def.Vals()) {
       if (add_sep) code_ += "{{SEP}}";
       GenComment(ev->doc_comment );
-      code_.SetValue("KEY", GenEnumValDecl(enum_def, Name(*ev)));
+      code_.SetValue("KEY",  ToUpper(Name(*ev)) );
       code_.SetValue("VALUE", enum_def.ToString(*ev) );
       code_ += "\t{{KEY}} = {{VALUE}}\\";
       add_sep = true;
