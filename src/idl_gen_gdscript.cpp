@@ -240,6 +240,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_.SetValue("FIELD_NAME", Name(*field));
       code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+
       const auto &type = field->value.type;
       bool basic_type = true;
       switch( type.base_type ){
@@ -300,6 +301,11 @@ class GdscriptGenerator : public BaseGenerator {
           case BASE_TYPE_ARRAY:basic_type = false;break;
       }
       if( basic_type ){
+          // Check if this is an enum type
+          // So far this is the only way I know how to determine this
+          if (field->value.type.enum_def){
+            code_.SetValue("RETURN_TYPE", Name( *field->value.type.enum_def) );
+          }
           code_ +=
               "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
               "\t\tvar offset = get_field_offset( {{OFFSET_NAME}} )\n"
