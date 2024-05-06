@@ -21,8 +21,6 @@ static inline std::string ToUpper(std::string val) {
   return val;
 }
 
-
-
 namespace gdscript {
 
 // Extension of IDLOptions for gdscript-generator.
@@ -85,6 +83,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_.Clear();
     code_ += "# " + std::string(FlatBuffersGeneratedWarning()) + "\n\n";
 
+
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
       if (!enum_def->generated) {
@@ -103,7 +102,6 @@ class GdscriptGenerator : public BaseGenerator {
         GenTable(*struct_def);
       }
     }
-
 
     const auto file_path = GeneratedFileName(path_, file_name_, opts_);
     const auto final_code = code_.ToString();
@@ -199,10 +197,11 @@ class GdscriptGenerator : public BaseGenerator {
     GenComment(struct_def.doc_comment);
 
     code_.SetValue("STRUCT_NAME", Name(struct_def));
+    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
     code_ +=
-        "class FB_{{STRUCT_NAME}} extends GD_FlatBuffer:\n"
-        "\tfunc Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ):\n"
-        "\t\tvar new_{{STRUCT_NAME}} = FB_{{STRUCT_NAME}}.new()\n"
+        "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:\n"
+        "\tstatic func Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ):\n"
+        "\t\tvar new_{{STRUCT_NAME}} = {{PREFIX}}{{STRUCT_NAME}}.new()\n"
         "\t\tnew_{{STRUCT_NAME}}.start = _start\n"
         "\t\tnew_{{STRUCT_NAME}}.bytes = _bytes\n"
         "\t\treturn new_{{STRUCT_NAME}}\n";
@@ -240,83 +239,154 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_.SetValue("FIELD_NAME", Name(*field));
       code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+      code_.SetValue("RETURN_TYPE", "BEANS");
 
       const auto &type = field->value.type;
-      bool basic_type = true;
-      switch( type.base_type ){
-          case BASE_TYPE_NONE:basic_type = false;break;
-          case BASE_TYPE_UTYPE:basic_type = false;break;
-          case BASE_TYPE_BOOL:
-              code_.SetValue("DECODE_FUNC", "u8" );
-              code_.SetValue("RETURN_TYPE", "bool" );
-              break;
-          case BASE_TYPE_CHAR:
-              code_.SetValue("DECODE_FUNC", "s8");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_UCHAR:
-              code_.SetValue("DECODE_FUNC", "u8");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_SHORT:
-              code_.SetValue("DECODE_FUNC", "s16");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_USHORT:
-              code_.SetValue("DECODE_FUNC", "u16");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_INT:
-              code_.SetValue("DECODE_FUNC", "s32");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_UINT:
-              code_.SetValue("DECODE_FUNC", "u32");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_LONG:
-              code_.SetValue("DECODE_FUNC", "s64");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_ULONG:
-              code_.SetValue("DECODE_FUNC", "u64");
-              code_.SetValue("RETURN_TYPE", "int" );
-              break;
-          case BASE_TYPE_FLOAT:
-              code_.SetValue("DECODE_FUNC", "float");
-              code_.SetValue("RETURN_TYPE", "float" );
-              break;
-          case BASE_TYPE_DOUBLE:
-              code_.SetValue("DECODE_FUNC", "double");
-              code_.SetValue("RETURN_TYPE", "float" );
-              break;
-          case BASE_TYPE_STRING:
-              //FIXME This is a different type and needs additional consideration
-              basic_type = false;
-              break;
-          case BASE_TYPE_VECTOR:basic_type = false;break;
-          case BASE_TYPE_VECTOR64:basic_type = false;break;
-          case BASE_TYPE_STRUCT:basic_type = false;break;
-          case BASE_TYPE_UNION:basic_type = false;break;
-          case BASE_TYPE_ARRAY:basic_type = false;break;
-      }
-      if( basic_type ){
-          // Check if this is an enum type
-          // So far this is the only way I know how to determine this
-          if (field->value.type.enum_def){
-            code_.SetValue("RETURN_TYPE", Name( *field->value.type.enum_def) );
+
+      if( IsArray(type) ){code_ += "# {{FIELD_NAME}} IsArray";}
+      if( IsIncompleteStruct(type) ){code_ += "# {{FIELD_NAME}} IsIncompleteStruct";}
+      if( IsStruct(type) ){code_ += "# {{FIELD_NAME}} IsStruct";}
+      if( IsUnion(type) ){code_ += "# {{FIELD_NAME}} IsUnion";}
+      if( IsUnionType(type) ){code_ += "# {{FIELD_NAME}} IsUnionType";}
+
+      if( IsSeries(type) ){
+        code_ += "# {{FIELD_NAME}} IsSeries";
+
+        if( IsVector(type) ){
+          if( IsVectorOfTable(type) || IsVectorOfStruct(type) ){
+            if( type.struct_def ){
+              code_.SetValue( "RETURN_TYPE", type.struct_def->name );
+            }
+          } else{
+            code_.SetValue( "RETURN_TYPE", TypeName(type.element) );
           }
+          code_ += "\t# Vector[{{RETURN_TYPE}}]";
+        }
+        if( IsArray(type) ){
+          code_.SetValue( "FIXED_LENGTH", NumToString(type.fixed_length) );
+          code_ += "\t# has fixed_length: {{FIXED_LENGTH}}";
+        }
+
+        // Convenience Function to get the size of the array
+        code_ +=
+            "\tfunc {{FIELD_NAME}}_count() -> int:\n"
+            "\t\treturn get_array_count( {{OFFSET_NAME}} )\n";
+
+        if( type.element == BASE_TYPE_STRING ) {
+          code_ +=
+              "\tfunc {{FIELD_NAME}}_get( index : int ) -> String:\n"
+              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+              "\t\tif foffset: return decode_string( get_array_field_offset(foffset, index) )\n"
+              "\t\treturn \"\"\n";
+
+          code_ +=
+              "\tfunc {{FIELD_NAME}}() -> FlatBuffer_Array:\n"
+              "\t\treturn get_array( {{OFFSET_NAME}}, decode_string )\n";
+        } else {
+          code_ +=
+              "\tfunc {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{RETURN_TYPE}}:\n"
+              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+              "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( get_array_field_offset(foffset, index), bytes )\n"
+              "\t\treturn null\n";
+
+          code_ +=
+              "\tfunc {{FIELD_NAME}}() -> FlatBuffer_Array:\n"
+              "\t\treturn get_array( {{OFFSET_NAME}}, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )\n";
+        }
+      }
+      else if( IsString(type) ){
+        code_ += "# IsString == true";
+        code_.SetValue("RETURN_TYPE", "String" );
+        code_ +=
+            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
+            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+            "\t\tif foffset: return decode_string( foffset )\n"
+            "\t\treturn \"\"\n";
+      }
+      else if( IsTable(type) ){
+
+        code_ += "# IsTable == true";
+        code_.SetValue("RETURN_TYPE", type.struct_def->name );
+        code_ +=
+            "\tfunc {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:\n"
+            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+            "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( foffset, bytes )\n"
+            "\t\treturn null\n";}
+      else{
+        continue;
+        switch( type.base_type ){
+          case BASE_TYPE_NONE:break;
+          case BASE_TYPE_UTYPE:break;
+          case BASE_TYPE_BOOL:
+            code_.SetValue("DECODE_FUNC", "u8" );
+            code_.SetValue("RETURN_TYPE", "bool" );
+            break;
+          case BASE_TYPE_CHAR:
+            code_.SetValue("DECODE_FUNC", "s8");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_UCHAR:
+            code_.SetValue("DECODE_FUNC", "u8");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_SHORT:
+            code_.SetValue("DECODE_FUNC", "s16");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_USHORT:
+            code_.SetValue("DECODE_FUNC", "u16");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_INT:
+            code_.SetValue("DECODE_FUNC", "s32");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_UINT:
+            code_.SetValue("DECODE_FUNC", "u32");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_LONG:
+            code_.SetValue("DECODE_FUNC", "s64");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_ULONG:
+            code_.SetValue("DECODE_FUNC", "u64");
+            code_.SetValue("RETURN_TYPE", "int" );
+            break;
+          case BASE_TYPE_FLOAT:
+            code_.SetValue("DECODE_FUNC", "float");
+            code_.SetValue("RETURN_TYPE", "float" );
+            break;
+          case BASE_TYPE_DOUBLE:
+            code_.SetValue("DECODE_FUNC", "double");
+            code_.SetValue("RETURN_TYPE", "float" );
+            break;
+          case BASE_TYPE_STRING:break;
+          case BASE_TYPE_VECTOR:break;
+          case BASE_TYPE_VECTOR64:break;
+          case BASE_TYPE_STRUCT:break;
+          case BASE_TYPE_UNION:break;
+          case BASE_TYPE_ARRAY:break;
+        }
+        if (IsEnum(field->value.type)){
+          code_.SetValue("RETURN_TYPE", Name( *field->value.type.enum_def) );
+          code_ += "# {{FIELD_NAME}} is an Enum type with a return type of: {{RETURN_TYPE}}";
           code_ +=
               "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-              "\t\tvar offset = get_field_offset( {{OFFSET_NAME}} )\n"
-              "\t\tif offset: return bytes.decode_{{DECODE_FUNC}}(offset)\n"
-              "\t\treturn 0 # TODO\n";
-      } else {
+              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+              "\t\tif foffset: return bytes.decode_{{DECODE_FUNC}}(foffset) as {{RETURN_TYPE}}\n"
+              "\t\treturn 0 as {{RETURN_TYPE}}\n";
+        } else {
+          code_ += "# {{FIELD_NAME}} is a basic type with return type: {{RETURN_TYPE}}";
           code_ +=
-          "\tfunc {{FIELD_NAME}}():\n"
-          "\t\tvar offset = get_field_offset( {{OFFSET_NAME}} )\n";
-      }
+              "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
+              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+              "\t\tif foffset: return bytes.decode_{{DECODE_FUNC}}(foffset)\n"
+              "\t\treturn 0\n";
+        }
 
+      }
+      code_ += "";
     }
   }
 };
