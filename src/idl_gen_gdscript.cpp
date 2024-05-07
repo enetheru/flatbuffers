@@ -194,11 +194,11 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue("DECODE_FUNC", "decode_ulong" );
         break;
       case BASE_TYPE_FLOAT:
-        code_.SetValue("RETURN_TYPE", "int" );
+        code_.SetValue("RETURN_TYPE", "float" );
         code_.SetValue("DECODE_FUNC", "decode_float" );
         break;
       case BASE_TYPE_DOUBLE:
-        code_.SetValue("RETURN_TYPE", "int" );
+        code_.SetValue("RETURN_TYPE", "float" );
         code_.SetValue("DECODE_FUNC", "decode_double" );
         break;
       case BASE_TYPE_STRING:
@@ -225,6 +225,35 @@ class GdscriptGenerator : public BaseGenerator {
     std::string text;
     ::flatbuffers::GenComment(dc, &text, nullptr, prefix);
     code_ += text + "\\";
+  }
+
+  void GenFieldDebug( const FieldDef &field){
+    code_.SetValue("FIELD_NAME", Name(field));
+    if (field.deprecated) { code_ += "# DEPRECATED ";}
+    code_ += "# Generating code for '{{FIELD_NAME}}'";
+    if ( field.IsScalar() ){code_ += "# FieldDef->IsScalar";}
+    code_ += "# FieldDef->value.constant: " + field.value.constant;
+
+    code_.SetValue("OFFSET", NumToString(field.value.offset) );
+    code_ += "# FieldDef->value.offset: {{OFFSET}}";
+
+    const auto &type = field.value.type;
+
+    code_ += "# type = FieldDef->value->type:";
+    code_.SetValue( "BASE_TYPE", TypeName(type.base_type) );
+    code_ += "# type.base_type: {{BASE_TYPE}}";
+
+    //      BaseType element;       // only set if t == BASE_TYPE_VECTOR or
+    //                              // BASE_TYPE_VECTOR64
+    code_ += "# type = FieldDef->value->type:";
+    code_.SetValue( "ELEMENT", TypeName(type.element) );
+    code_ += "# type.base_type: {{ELEMENT}}";
+    //      StructDef *struct_def;  // only set if t or element == BASE_TYPE_STRUCT
+    //      EnumDef *enum_def;      // set if t == BASE_TYPE_UNION / BASE_TYPE_UTYPE,
+    //                              // or for an integral type derived from an enum.
+    //      uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
+    GetDecodeReturnValues(type.base_type);
+    code_ += "# {{DECODE_FUNC}} | {{RETURN_TYPE}}";
   }
 
   std::string GenFieldOffsetName(const FieldDef &field) {
@@ -270,10 +299,22 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "}\n";
   }
 
+  int GenStructFieldAccessor(){
+    return 0;
+  }
+
   void GenStruct( const StructDef &struct_def ){
     // Generate an accessor struct, with methods of the form:
     // func name() -> type :
     GenComment(struct_def.doc_comment);
+    code_ += "# Just collecting information";
+
+//    bool fixed;       // If it's struct, not a table.
+//    bool predecl;     // If it's used before it was defined.
+//    bool sortbysize;  // Whether fields come in the declaration or size order.
+//    bool has_key;     // It has a key field.
+//    size_t minalign;  // What the whole object needs to be aligned to.
+//    size_t bytesize;  // Size if fixed.
 
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
@@ -286,101 +327,33 @@ class GdscriptGenerator : public BaseGenerator {
         "\t\treturn new_{{STRUCT_NAME}}\n";
 
     // Generate the accessors.
+    int current_offset = 0;
     for (const auto &field : struct_def.fields.vec) {
+      GenFieldDebug(*field);
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
       }
 
-      code_.SetValue("FIELD_NAME", Name(*field));
-
       const auto &type = field->value.type;
 
-      if( IsArray(type) ){code_ += "# {{FIELD_NAME}} IsArray";}
-      if( IsIncompleteStruct(type) ){code_ += "# {{FIELD_NAME}} IsIncompleteStruct";}
-      if( IsStruct(type) ){code_ += "# {{FIELD_NAME}} IsStruct";}
-      if( IsUnion(type) ){code_ += "# {{FIELD_NAME}} IsUnion";}
-      if( IsUnionType(type) ){code_ += "# {{FIELD_NAME}} IsUnionType";}
-
-      if( IsSeries(type) ) {
-        code_ += "# {{FIELD_NAME}} IsSeries";
-
-        if (IsVector(type)) {
-          if (IsVectorOfTable(type) || IsVectorOfStruct(type)) {
-            if (type.struct_def) {
-              code_.SetValue("RETURN_TYPE", type.struct_def->name);
-            }
-          } else {
-            code_.SetValue("RETURN_TYPE", TypeName(type.element));
-          }
-          code_ += "\t# Vector[{{RETURN_TYPE}}]";
-        }
-        if (IsArray(type)) {
-          code_.SetValue("FIXED_LENGTH", NumToString(type.fixed_length));
-          code_ += "\t# has fixed_length: {{FIXED_LENGTH}}";
-        }
-
-        // Convenience Function to get the size of the array
-        code_ +=
-            "\tfunc {{FIELD_NAME}}_count() -> int:\n"
-            "\t\treturn get_array_count( {{OFFSET_NAME}} )\n";
-
-        code_.SetValue("DEFAULT", "0");
-        if( GetDecodeReturnValues(type.element) ){
-          GenFieldArrayBasic();
-        } else {
-          code_ +=
-              "\tfunc {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{RETURN_TYPE}}:\n"
-              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-              "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( get_array_field_offset(foffset, index), bytes )\n"
-              "\t\treturn null\n";
-
-          code_ +=
-              "\tfunc {{FIELD_NAME}}() -> FlatBuffer_Array:\n"
-              "\t\treturn get_array( {{OFFSET_NAME}}, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )\n";
-        }
-      }
-      else if( IsString(type) ){
-        code_ += "# IsString == true";
-        code_.SetValue("RETURN_TYPE", "String" );
-        code_ +=
-            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-            "\t\tif foffset: return decode_string( foffset )\n"
-            "\t\treturn \"\"\n";
-      }
-      else if( IsTable(type) ){
-        code_ += "# IsTable == true";
-        code_.SetValue("RETURN_TYPE", type.struct_def->name );
-        code_ +=
-            "\tfunc {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:\n"
-            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-            "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( foffset, bytes )\n"
-            "\t\treturn null\n";}
-      else{
-        if(! GetDecodeReturnValues( type.base_type ) ){
-          code_ += "# TODO {{FIELD_NAME}}";
-          continue;
-        }
-
-        if (IsEnum(field->value.type)){
-          code_.SetValue("RETURN_TYPE", Name( *field->value.type.enum_def) );
-          code_ += "# {{FIELD_NAME}} is an Enum type with a return type of: {{RETURN_TYPE}}";
+      if( IsArray(type) ){code_ += "\t# IsArray";}
+      else if( IsStruct(type) ){code_ += "\t# IsStruct";}
+      else if( IsIncompleteStruct(type) ){code_ += "\t# IsIncompleteStruct";}
+      else if( IsUnion(type) ){code_ += "\t# IsUnion";}
+      else if( IsUnionType(type) ){code_ += "\t# IsUnionType";}
+      else if( IsSeries(type) ){code_ += "\t# IsSeries";}
+      else if (IsVector(type)) {code_ += "\t# IsVector";}
+      else if (IsVectorOfTable(type)) {code_ += "\t# IsVectorOfTable";}
+      else if (IsVectorOfStruct(type)) {code_ += "\t# IsVectorOfStruct";}
+      else if (IsArray(type)) {code_ += "\t# IsArray";}
+      else if( IsString(type) ){code_ += "\t# IsString";}
+      else if( IsTable(type) ){code_ += "\t# IsTable";}
+      else if (IsEnum(field->value.type)){code_ += "\t# IsEnum";}
+      else{ code_ += "\t# IsBasic";
           code_ +=
               "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-              "\t\tif foffset: return {{DECODE_FUNC}}(foffset) as {{RETURN_TYPE}}\n"
-              "\t\treturn 0 as {{RETURN_TYPE}}\n";
-        } else {
-
-          code_ += "# {{FIELD_NAME}} is a basic type with return type: {{RETURN_TYPE}}";
-          code_ +=
-              "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-              "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-              "\t\tif foffset: return {{DECODE_FUNC}}(foffset)\n"
-              "\t\treturn 0\n";
-        }
-
+              "\t\treturn {{DECODE_FUNC}}(start + {{OFFSET}})";
       }
       code_ += "";
     }
@@ -428,6 +401,7 @@ class GdscriptGenerator : public BaseGenerator {
 
     // Generate the accessors.
     for (const auto &field : struct_def.fields.vec) {
+      GenFieldDebug(*field);
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
