@@ -156,7 +156,7 @@ class GdscriptGenerator : public BaseGenerator {
   std::string Name(const EnumVal &ev) const { return EscapeKeyword(ev.name); }
 
   bool GetDecodeReturnValues( BaseType base_type ){
-    switch(base_type ){
+    switch( base_type ){
       case BASE_TYPE_BOOL:
         code_.SetValue("RETURN_TYPE", "bool" );
         code_.SetValue("DECODE_FUNC", "decode_bool" );
@@ -291,10 +291,52 @@ class GdscriptGenerator : public BaseGenerator {
 //    uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
     code_ += "#  fixed_length: " + NumToString(type.fixed_length);
 
+    code_ += "#  IsStruct() = \\";
+    code_ += IsStruct(type) ? "true" : "false";
+    code_ += "#  IsArray() = \\";
+    code_ += IsArray(type) ? "true" : "false";
+    code_ += "#  IsIncompleteStruct: \\";
+    code_ += IsIncompleteStruct(type) ? "true" : "false";
+    code_ += "#  IsUnion() = \\";
+    code_ += IsUnion(type) ? "true" : "false";
+    code_ += "#  IsUnionType() = \\";
+    code_ += IsUnionType(type) ? "true" : "false";
+    code_ += "#  IsSeries() = \\";
+    code_ += IsSeries(type) ? "true" : "false";
+    code_ += "#  IsVector() = \\";
+    code_ += IsVector(type) ? "true" : "false";
+    code_ += "#  IsVectorOfTable() = \\";
+    code_ += IsVectorOfTable(type) ? "true" : "false";
+    code_ += "#  IsVectorOfStruct: \\";
+    code_ += IsVectorOfStruct(type) ? "true" : "false";
+    code_ += "#  IsArray() = \\";
+    code_ += IsArray(type) ? "true" : "false";
+    code_ += "#  IsString() = \\";
+    code_ += IsString(type) ? "true" : "false";
+    code_ += "#  IsTable() = \\";
+    code_ += IsTable(type) ? "true" : "false";
+    code_ += "#  IsEnum() = \\";
+    code_ += IsEnum(type) ? "true" : "false";
+
     code_ += "#}";
 
-    GetDecodeReturnValues(type.base_type);
-    code_ += "# {{DECODE_FUNC}} | {{RETURN_TYPE}}";
+
+    if( IsEnum(type) ){
+      code_ += "#FieldDef.Value.EnumDef {";
+      const auto & enum_def = *type.enum_def;
+//      bool is_union;
+      code_ += "#  is_union: \\";
+      code_ += enum_def.is_union ? "true" : "false";
+//      // Type is a union which uses type aliases where at least one type is
+//      // available under two different names.
+//      bool uses_multiple_type_instances;
+      code_ += "#  uses_multiple_type_instances: \\";
+      code_ += enum_def.uses_multiple_type_instances ? "true" : "false";
+      code_ += "#  MinValue() = " + NumToString( enum_def.MinValue() );
+      code_ += "#  MaxValue() = " + NumToString( enum_def.MaxValue() );
+//      Type underlying_type;
+      code_ += "#}";
+    }
   }
 
   std::string GenFieldOffsetName(const FieldDef &field) {
@@ -345,21 +387,13 @@ class GdscriptGenerator : public BaseGenerator {
     // The generated classes are like a view into a PackedByteArray,
     // it decodes the data on access.
 
-    // StructDef properties
-    //  bool fixed;       // If it's struct, not a table.
-    //  bool predecl;     // If it's used before it was defined.
-    //  bool sortbysize;  // Whether fields come in the declaration or size order.
-    //  bool has_key;     // It has a key field.
-    //  size_t minalign;  // What the whole object needs to be aligned to.
-    //  size_t bytesize;  // Size if fixed.
-
     GenComment(struct_def.doc_comment);
     // Generate the class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     // FIXME tie the {{PREFIX}} to something, perhaps namespace
     code_.SetValue( "PREFIX", "FB_");
     code_ +=
-        "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:\n";
+        "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:";
 
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
@@ -382,24 +416,17 @@ class GdscriptGenerator : public BaseGenerator {
       const auto &type = field->value.type;
       code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
       if( field->IsScalar() ){
+        if( IsEnum( type ) ){
+          GetDecodeReturnValues( type.enum_def->underlying_type.base_type );
+        } else{
+          GetDecodeReturnValues( type.base_type );
+        }
         code_ +=
             "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
             "\t\treturn {{DECODE_FUNC}}(start + {{OFFSET}})";
+      } else {
+        code_ += "#TODO - Implement this type";
       }
-      else if( IsArray(type) ){code_ += "\t# IsArray";}
-      else if( IsStruct(type) ){code_ += "\t# IsStruct";}
-      else if( IsIncompleteStruct(type) ){code_ += "\t# IsIncompleteStruct";}
-      else if( IsUnion(type) ){code_ += "\t# IsUnion";}
-      else if( IsUnionType(type) ){code_ += "\t# IsUnionType";}
-      else if( IsSeries(type) ){code_ += "\t# IsSeries";}
-      else if (IsVector(type)) {code_ += "\t# IsVector";}
-      else if (IsVectorOfTable(type)) {code_ += "\t# IsVectorOfTable";}
-      else if (IsVectorOfStruct(type)) {code_ += "\t# IsVectorOfStruct";}
-      else if (IsArray(type)) {code_ += "\t# IsArray";}
-      else if( IsString(type) ){code_ += "\t# IsString";}
-      else if( IsTable(type) ){code_ += "\t# IsTable";}
-      else if (IsEnum(field->value.type)){code_ += "\t# IsEnum";}
-      else { code_ += "\t# Is Unknown";}
       code_ += "";
     }
   }
@@ -411,15 +438,51 @@ class GdscriptGenerator : public BaseGenerator {
 
     const auto &type = field.value.type;
 
-    if( IsArray(type) ){code_ += "# {{FIELD_NAME}} IsArray";}
-    if( IsIncompleteStruct(type) ){code_ += "# {{FIELD_NAME}} IsIncompleteStruct";}
-    if( IsStruct(type) ){code_ += "# {{FIELD_NAME}} IsStruct";}
-    if( IsUnion(type) ){code_ += "# {{FIELD_NAME}} IsUnion";}
-    if( IsUnionType(type) ){code_ += "# {{FIELD_NAME}} IsUnionType";}
-
-    if( IsSeries(type) ) {
-      code_ += "# {{FIELD_NAME}} IsSeries";
-
+    if( field.IsScalar() ){
+      if (IsEnum(type) ){
+        const auto &enum_def = *type.enum_def;
+        GetDecodeReturnValues(enum_def.underlying_type.base_type);
+        code_.SetValue("RETURN_TYPE", Name( enum_def) );
+        code_ +=
+            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
+            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+            "\t\tif foffset: return {{DECODE_FUNC}}(foffset) as {{RETURN_TYPE}}\n"
+            "\t\treturn 0 as {{RETURN_TYPE}}";
+      }
+      else {
+        GetDecodeReturnValues(type.base_type );
+        code_ +=
+            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
+            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+            "\t\tif foffset: return {{DECODE_FUNC}}(foffset)\n"
+            "\t\treturn 0";
+      }
+    }
+    else if( IsString(type) ){
+      GetDecodeReturnValues( type.base_type );
+      code_ +=
+          "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
+          "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+          "\t\tif foffset: return {{DECODE_FUNC}}( foffset )\n"
+          "\t\treturn \"\"";
+    }
+    else if( IsStruct(type) ){
+      code_.SetValue("RETURN_TYPE", type.struct_def->name );
+      code_ +=
+          "\tfunc {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:\n"
+          "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+          "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( foffset, bytes )\n"
+          "\t\treturn null";
+    }
+    else if( IsTable(type) ){
+      code_.SetValue("RETURN_TYPE", type.struct_def->name );
+      code_ +=
+          "\tfunc {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:\n"
+          "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
+          "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( foffset, bytes )\n"
+          "\t\treturn null";
+    }
+    else if( IsSeries(type) ) {
       if (IsVector(type)) {
         if (IsVectorOfTable(type) || IsVectorOfStruct(type)) {
           if (type.struct_def) {
@@ -454,61 +517,28 @@ class GdscriptGenerator : public BaseGenerator {
             "\tfunc {{FIELD_NAME}}() -> FlatBuffer_Array:\n"
             "\t\treturn get_array( {{OFFSET_NAME}}, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )\n";
       }
-    }
-    else if( IsString(type) ){
-      code_ += "# IsString == true";
-      code_.SetValue("RETURN_TYPE", "String" );
-      code_ +=
-          "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-          "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-          "\t\tif foffset: return decode_string( foffset )\n"
-          "\t\treturn \"\"\n";
-    }
-    else if( IsTable(type) ){
-      code_ += "# IsTable == true";
-      code_.SetValue("RETURN_TYPE", type.struct_def->name );
-      code_ +=
-          "\tfunc {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:\n"
-          "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-          "\t\tif foffset: return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( foffset, bytes )\n"
-          "\t\treturn null\n";}
-    else{
-      if(! GetDecodeReturnValues( type.base_type ) ){
-        code_ += "# TODO {{FIELD_NAME}}";
-        return;
-      }
-
-      if (IsEnum(field.value.type)){
-        code_.SetValue("RETURN_TYPE", Name( *type.enum_def) );
-        code_ += "# {{FIELD_NAME}} is an Enum type with a return type of: {{RETURN_TYPE}}";
-        code_ +=
-            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-            "\t\tif foffset: return {{DECODE_FUNC}}(foffset) as {{RETURN_TYPE}}\n"
-            "\t\treturn 0 as {{RETURN_TYPE}}\n";
-      } else {
-
-        code_ += "# {{FIELD_NAME}} is a basic type with return type: {{RETURN_TYPE}}";
-        code_ +=
-            "\tfunc {{FIELD_NAME}}() -> {{RETURN_TYPE}}:\n"
-            "\t\tvar foffset = get_field_offset( {{OFFSET_NAME}} )\n"
-            "\t\tif foffset: return {{DECODE_FUNC}}(foffset)\n"
-            "\t\treturn 0\n";
-      }
+    } else {
+      code_ += "#TODO - Implement this type";
     }
     code_ += "";
   }
 
   // Generate an accessor struct
   void GenTable(const StructDef &struct_def) {
-    // Generate an accessor struct, with methods of the form:
-    // func name() -> type :
+    // Generate class to access the table fields
+    // The generated classes are like a view into a PackedByteArray,
+    // it decodes the data on access.
+
     GenComment(struct_def.doc_comment);
 
+    //Generate Class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
     code_ +=
-        "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:\n"
+        "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:";
+    // GDScript likes to have empty constructors and cant do overloading.
+    // So generate the static factory func in place of a constructor.
+    code_ +=
         "\tstatic func Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ):\n"
         "\t\tvar new_{{STRUCT_NAME}} = {{PREFIX}}{{STRUCT_NAME}}.new()\n"
         "\t\tnew_{{STRUCT_NAME}}.start = _start\n"
