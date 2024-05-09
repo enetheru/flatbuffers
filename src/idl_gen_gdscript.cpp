@@ -165,39 +165,39 @@ class GdscriptGenerator : public BaseGenerator {
     switch( base_type ){
       case BASE_TYPE_BOOL:
         code_.SetValue("RETURN_TYPE", "bool" );
-        code_.SetValue("DECODE_FUNC", "decode_bool" );
+        code_.SetValue("DECODE_FUNC", "decode_u8" );
         break;
       case BASE_TYPE_CHAR:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_char" );
+        code_.SetValue("DECODE_FUNC", "decode_s8" );
         break;
       case BASE_TYPE_UCHAR:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_uchar" );
+        code_.SetValue("DECODE_FUNC", "decode_u8" );
         break;
       case BASE_TYPE_SHORT:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_short" );
+        code_.SetValue("DECODE_FUNC", "decode_s16" );
         break;
       case BASE_TYPE_USHORT:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_ushort" );
+        code_.SetValue("DECODE_FUNC", "decode_u16" );
         break;
       case BASE_TYPE_INT:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_int" );
+        code_.SetValue("DECODE_FUNC", "decode_s32" );
         break;
       case BASE_TYPE_UINT:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_uint" );
+        code_.SetValue("DECODE_FUNC", "decode_u32" );
         break;
       case BASE_TYPE_LONG:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_long" );
+        code_.SetValue("DECODE_FUNC", "decode_s64" );
         break;
       case BASE_TYPE_ULONG:
         code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_ulong" );
+        code_.SetValue("DECODE_FUNC", "decode_u64" );
         break;
       case BASE_TYPE_FLOAT:
         code_.SetValue("RETURN_TYPE", "float" );
@@ -234,7 +234,6 @@ class GdscriptGenerator : public BaseGenerator {
   }
 
   void GenFieldDebug( const FieldDef &field){
-    return;
     code_.SetValue("FIELD_NAME", Name(field));
     code_ += "# GenFieldDebug for: '{{FIELD_NAME}}'";
     code_ += "#FieldDef {";
@@ -352,23 +351,6 @@ class GdscriptGenerator : public BaseGenerator {
     return "VT_" + uname;
   }
 
-  void GenFieldArrayBasic(){
-    code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{RETURN_TYPE}}:";
-    code_.IncrementIdentLevel();
-    code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-    code_ += "if not foffset: return {{DEFAULT}}";
-    code_ += "var array_start = get_field_start( foffset )";
-    code_ += "var element_start = get_array_element_start( array_start, index )";
-    code_ += "return {{DECODE_FUNC}}( element_start )";
-    code_.DecrementIdentLevel();
-    code_ += "";
-    code_ += "func {{FIELD_NAME}}() -> FlatBuffer_Array:";
-    code_.IncrementIdentLevel();
-    code_ += "return get_array( {{OFFSET_NAME}}, {{DECODE_FUNC}} )";
-    code_.DecrementIdentLevel();
-    code_ += "";
-  }
-
   // Generate an enum declaration
   void GenEnum(const EnumDef &enum_def) {
     code_.SetValue("ENUM_NAME", Name(enum_def));
@@ -400,9 +382,9 @@ class GdscriptGenerator : public BaseGenerator {
     GenComment(struct_def.doc_comment);
     // Generate the class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    // FIXME tie the {{PREFIX}} to something, perhaps namespace
+    // TODO tie the {{PREFIX}} to something, perhaps namespace
     code_.SetValue( "PREFIX", "FB_");
-    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:";
+    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
 
     // GDScript likes to have empty constructors and cant do overloading.
@@ -418,11 +400,11 @@ class GdscriptGenerator : public BaseGenerator {
     // Generate the accessor functions, in the form:
     // func name() -> type :
     for (const auto &field : struct_def.fields.vec) {
-      GenFieldDebug(*field);
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
       }
+      code_.SetValue( "FIELD_NAME", Name(*field) );
 
       const auto &type = field->value.type;
       code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
@@ -434,13 +416,15 @@ class GdscriptGenerator : public BaseGenerator {
         }
         code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return {{DECODE_FUNC}}(start + {{OFFSET}})";
+        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET}})";
         code_.DecrementIdentLevel();
       } else {
         code_ += " #TODO - Implement this type";
       }
       code_ += "";
     }
+    code_.DecrementIdentLevel();
+    code_ += "";
   }
 
   void GenTableFieldAccess(const FieldDef &field) {
@@ -463,7 +447,7 @@ class GdscriptGenerator : public BaseGenerator {
       code_.IncrementIdentLevel();
       code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
       code_ += "if not foffset: return {{DEFAULT}} as {{RETURN_TYPE}}";
-      code_ += "return {{DECODE_FUNC}}( start + foffset ) as {{RETURN_TYPE}}";
+      code_ += "return bytes.{{DECODE_FUNC}}( start + foffset ) as {{RETURN_TYPE}}";
       code_.DecrementIdentLevel();
     }
     else if( IsString(type) ){
@@ -487,20 +471,8 @@ class GdscriptGenerator : public BaseGenerator {
       code_.DecrementIdentLevel();
     }
     else if( IsSeries(type) ) {
-      if (IsVector(type)) {
-        if (IsVectorOfTable(type) || IsVectorOfStruct(type)) {
-          if (type.struct_def) {
-            code_.SetValue("RETURN_TYPE", type.struct_def->name);
-          }
-        } else {
-          code_.SetValue("RETURN_TYPE", TypeName(type.element));
-        }
-        code_ += "# {{FIELD_NAME}}: Vector[{{RETURN_TYPE}}]";
-      }
-      if (IsArray(type)) {
-        code_.SetValue("FIXED_LENGTH", NumToString(type.fixed_length));
-        code_ += "# has fixed_length: {{FIXED_LENGTH}}";
-      }
+      GenFieldDebug(field);
+      code_.SetValue("DEFAULT", "0");
 
       // Convenience Function to get the size of the array
       code_ += "func {{FIELD_NAME}}_count() -> int:";
@@ -509,29 +481,73 @@ class GdscriptGenerator : public BaseGenerator {
       code_.DecrementIdentLevel();
       code_ += "";
 
-      code_.SetValue("DEFAULT", "0");
-      if( GetDecodeReturnValues(type.element) ){
-        GenFieldArrayBasic();
-      } else {
-        code_ += "# {{FIELD_NAME}}: [{{RETURN_TYPE}}]";
-        code_ += "func {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{RETURN_TYPE}}:";
-        code_.IncrementIdentLevel();
-        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-        code_ += "if not foffset: return null";
-        code_ += "var array_start = get_field_start( foffset )";
-        code_ += "var element_start = get_array_element_start( array_start, index )";
-        code_ += "return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( element_start, bytes )";
-        code_.DecrementIdentLevel();
-        code_ += "";
+      if (IsVector(type)) {
+        if (IsVectorOfTable(type) || IsVectorOfStruct(type) ) {
+          if (type.struct_def) {
+            code_.SetValue("RETURN_TYPE", type.struct_def->name);
+          }
+          code_ += "# {{FIELD_NAME}}: [{{RETURN_TYPE}}]";
+          code_ += "func {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{RETURN_TYPE}}:";
+          code_.IncrementIdentLevel();
+          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "if not foffset: return null";
+          code_ += "var array_start = get_field_start( foffset )";
+          code_ += "var element_start = get_array_element_start( array_start, index )";
+          code_ += "return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( element_start, bytes )";
+          code_.DecrementIdentLevel();
+          code_ += "";
 
-        code_ += "func {{FIELD_NAME}}() -> FlatBuffer_Array:";
-        code_.IncrementIdentLevel();
-        code_ += "return get_array( {{OFFSET_NAME}}, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )";
-        code_.DecrementIdentLevel();
-        code_ += "";
+          code_ += "func {{FIELD_NAME}}() -> FlatBufferArray:";
+          code_.IncrementIdentLevel();
+          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "if not foffset: return null";
+          code_ += "var array_start = get_field_start( foffset )";
+          code_ += "return get_array( array_start, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )";
+          code_.DecrementIdentLevel();
+          code_ += "";
+        }
+        else {
+          GetDecodeReturnValues(type.element);
+          code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{RETURN_TYPE}}:";
+          code_.IncrementIdentLevel();
+          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "if not foffset: return {{DEFAULT}}";
+          code_ += "var array_start = get_field_start( foffset )";
+          code_ += "var element_start = get_array_element_start( array_start, index )";
+          if( type.element == BASE_TYPE_STRING ){
+            code_ += "return {{DECODE_FUNC}}( element_start )";
+          } else {
+            code_ += "return bytes.{{DECODE_FUNC}}( element_start )";
+          }
+          code_.DecrementIdentLevel();
+          code_ += "";
+          code_ += "func {{FIELD_NAME}}() -> FlatBufferArray:";
+          code_.IncrementIdentLevel();
+          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "if not foffset: return null";
+          code_ += "var array_start = get_field_start( foffset )";
+          if( type.element == BASE_TYPE_STRING ){
+            code_ += "return get_array( array_start, {{DECODE_FUNC}} )";
+          } else {
+            code_ += "return get_array( array_start, bytes.{{DECODE_FUNC}} )";
+          }
+          code_.DecrementIdentLevel();
+          code_ += "";
+        }
+        code_ += "# {{FIELD_NAME}}: Vector[{{RETURN_TYPE}}]";
+      }
+      else if (IsArray(type)) {
+        code_.SetValue("FIXED_LENGTH", NumToString(type.fixed_length));
+        code_ += "# has fixed_length: {{FIXED_LENGTH}}";
+        code_ += "# TODO Deal with Arrays";
+      }
+      else{
+        code_ += "# This is some unknown bullshit is what this is.";
+        GenFieldDebug(field);
       }
     } else {
       code_ += "# TODO - Implement this type";
+      GenFieldDebug(field);
     }
     code_ += "";
   }
@@ -547,7 +563,7 @@ class GdscriptGenerator : public BaseGenerator {
     //Generate Class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
-    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends GD_FlatBuffer:";
+    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
@@ -588,7 +604,6 @@ class GdscriptGenerator : public BaseGenerator {
 
     // Generate presence funcs
     for (const auto &field : struct_def.fields.vec) {
-      GenFieldDebug(*field);
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
@@ -604,7 +619,6 @@ class GdscriptGenerator : public BaseGenerator {
 
     // Generate the accessors.
     for (const auto &field : struct_def.fields.vec) {
-      GenFieldDebug(*field);
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
