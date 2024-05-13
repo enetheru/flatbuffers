@@ -22,6 +22,28 @@ static inline std::string ToUpper(std::string val) {
 }
 
 namespace gdscript {
+const std::string prefix = "FB_";
+const char *decode_funcs[] = {
+"",               // 0 NONE
+"decode_u8",      // 1 UTYPE
+"decode_u8",      // 2 BOOL
+"decode_s8",      // 3 CHAR
+"decode_u8",      // 4 UCHAR
+"decode_s16",     // 5 SHORT
+"decode_u16",     // 6 USHORT
+"decode_s32",     // 7 INT
+"decode_u32",     // 8 UINT
+"decode_s64",     // 9 LONG
+"decode_u64",     //10 ULONG
+"decode_float",   //11 FLOAT
+"decode_double",  //12 DOUBLE
+"decode_string",  //13 STRING
+"",               //14 VECTOR
+"",               //15 STRUCT
+"",               //16 UNION
+"",               //17 ARRAY
+"",               //18 VECTOR64
+};
 
 // Extension of IDLOptions for gdscript-generator.
 struct IDLOptionsGdscript : public IDLOptions {
@@ -32,6 +54,7 @@ struct IDLOptionsGdscript : public IDLOptions {
 };
 
 class GdscriptGenerator : public BaseGenerator {
+
  public:
   GdscriptGenerator(const Parser &parser, const std::string &path,
                const std::string &file_name, IDLOptionsGdscript opts)
@@ -84,12 +107,12 @@ class GdscriptGenerator : public BaseGenerator {
   // structs, and tables) and output them to a single file.
   bool generate() {
     code_.Clear();
-    code_ += "# " + std::string(FlatBuffersGeneratedWarning()) + "\n\n";
+    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
 
+    code_ += "# " + std::string(FlatBuffersGeneratedWarning());
     code_.SetValue( "FILE_NAME", file_name_ );
-    code_ += "class_name {{FILE_NAME}}"; //FIXME do I make the root_table the base class object?
-
-
+    //FIXME do I make the root_table the base class object?
+    code_ += "class_name {{FILE_NAME}}\n";
 
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
@@ -104,6 +127,7 @@ class GdscriptGenerator : public BaseGenerator {
         GenStruct(*struct_def);
       }
     }
+
     for (const auto &struct_def : parser_.structs_.vec) {
       if (!struct_def->fixed && !struct_def->generated) {
         GenTable(*struct_def);
@@ -160,76 +184,33 @@ class GdscriptGenerator : public BaseGenerator {
 
   std::string Name(const EnumVal &ev) const { return EscapeKeyword(ev.name); }
 
-  bool GetDecodeReturnValues( BaseType base_type ){
-    code_.SetValue("DEFAULT", "0" );
-    switch( base_type ){
-      case BASE_TYPE_BOOL:
-        code_.SetValue("RETURN_TYPE", "bool" );
-        code_.SetValue("DECODE_FUNC", "decode_u8" );
-        break;
-      case BASE_TYPE_CHAR:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_s8" );
-        break;
-      case BASE_TYPE_UCHAR:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_u8" );
-        break;
-      case BASE_TYPE_SHORT:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_s16" );
-        break;
-      case BASE_TYPE_USHORT:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_u16" );
-        break;
-      case BASE_TYPE_INT:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_s32" );
-        break;
-      case BASE_TYPE_UINT:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_u32" );
-        break;
-      case BASE_TYPE_LONG:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_s64" );
-        break;
-      case BASE_TYPE_ULONG:
-        code_.SetValue("RETURN_TYPE", "int" );
-        code_.SetValue("DECODE_FUNC", "decode_u64" );
-        break;
-      case BASE_TYPE_FLOAT:
-        code_.SetValue("RETURN_TYPE", "float" );
-        code_.SetValue("DECODE_FUNC", "decode_float" );
-        break;
-      case BASE_TYPE_DOUBLE:
-        code_.SetValue("RETURN_TYPE", "float" );
-        code_.SetValue("DECODE_FUNC", "decode_double" );
-        break;
-      case BASE_TYPE_STRING:
-        code_.SetValue("DEFAULT", "\"\"" );
-        code_.SetValue("RETURN_TYPE", "String" );
-        code_.SetValue("DECODE_FUNC", "decode_string" );
-        break;
-
-        // Unhandled
-      case BASE_TYPE_NONE:
-      case BASE_TYPE_UTYPE:
-      case BASE_TYPE_VECTOR:
-      case BASE_TYPE_VECTOR64:
-      case BASE_TYPE_STRUCT:
-      case BASE_TYPE_UNION:
-      case BASE_TYPE_ARRAY:
-      default:
-        return false;
+  void SetTypeValues( const Type &type ){
+    if( IsEnum(type) ){
+      code_.SetValue( "GODOT_TYPE", type.enum_def->name );
     }
-    return true;
+    else if( IsInteger(type.base_type) ){
+      code_.SetValue( "GODOT_TYPE", "int" );
+    }
+    else if( IsFloat(type.base_type) ){
+      code_.SetValue( "GODOT_TYPE", "float" );
+    }
+    else if( IsString( type ) ){
+      code_.SetValue( "GODOT_TYPE", "String" );
+    }
+    else if( IsStruct( type ) ){
+      code_.SetValue( "GODOT_TYPE", prefix + type.struct_def->name );
+    }
+    else if( IsTable( type ) ){
+      code_.SetValue( "GODOT_TYPE", prefix + type.struct_def->name );
+    }
+    else{
+      code_.SetValue( "GODOT_TYPE", "TODO" );
+    }
   }
 
-  void GenComment(const std::vector<std::string> &dc, const char *prefix = "#") {
+  void GenComment(const std::vector<std::string> &dc, const char *prefix_ = "#") {
     std::string text;
-    ::flatbuffers::GenComment(dc, &text, nullptr, prefix);
+    ::flatbuffers::GenComment(dc, &text, nullptr, prefix_);
     code_ += text + "\\";
   }
 
@@ -382,8 +363,6 @@ class GdscriptGenerator : public BaseGenerator {
     GenComment(struct_def.doc_comment);
     // Generate the class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    // TODO tie the {{PREFIX}} to something, perhaps namespace
-    code_.SetValue( "PREFIX", "FB_");
     code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
 
@@ -396,6 +375,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "new_{{STRUCT_NAME}}.bytes = _bytes";
     code_ += "return new_{{STRUCT_NAME}}";
     code_.DecrementIdentLevel();
+    code_ += "";
 
     // Generate the accessor functions, in the form:
     // func name() -> type :
@@ -408,18 +388,27 @@ class GdscriptGenerator : public BaseGenerator {
 
       const auto &type = field->value.type;
       code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
+
       if( field->IsScalar() ){
-        if( IsEnum( type ) ){
-          GetDecodeReturnValues( type.enum_def->underlying_type.base_type );
-        } else{
-          GetDecodeReturnValues( type.base_type );
-        }
-        code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
+        SetTypeValues( type );
+        code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET}})";
+        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET}}) \\";
+        code_ += IsEnum( type ) ? "as {{GODOT_TYPE}}" : "";
         code_.DecrementIdentLevel();
-      } else {
-        code_ += " #TODO - Implement this type";
+      }
+      else if( IsStruct( type) ){
+        SetTypeValues( type );
+        code_.SetValue("STRUCT_NAME", type.struct_def->name );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "return {{GODOT_TYPE}}.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_.DecrementIdentLevel();
+      }
+      else {
+        code_ += " #TODO - Unhandled Type";
+        GenFieldDebug( *field );
       }
       code_ += "";
     }
@@ -437,10 +426,8 @@ class GdscriptGenerator : public BaseGenerator {
     if( field.IsScalar() ){
       if (IsEnum(type) ){
         const auto &enum_def = *type.enum_def;
-        GetDecodeReturnValues(enum_def.underlying_type.base_type);
         code_.SetValue("RETURN_TYPE", Name( enum_def ) );
       } else {
-        GetDecodeReturnValues(type.base_type );
       }
       code_ += "# {{FIELD_NAME}}: {{RETURN_TYPE}}";
       code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
@@ -451,7 +438,6 @@ class GdscriptGenerator : public BaseGenerator {
       code_.DecrementIdentLevel();
     }
     else if( IsString(type) ){
-      GetDecodeReturnValues( type.base_type );
       code_ += "# {{FIELD_NAME}}: {{RETURN_TYPE}}";
       code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
       code_.IncrementIdentLevel();
@@ -507,7 +493,6 @@ class GdscriptGenerator : public BaseGenerator {
           code_ += "";
         }
         else {
-          GetDecodeReturnValues(type.element);
           code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{RETURN_TYPE}}:";
           code_.IncrementIdentLevel();
           code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
@@ -555,14 +540,13 @@ class GdscriptGenerator : public BaseGenerator {
   // Generate an accessor struct
   void GenTable(const StructDef &struct_def) {
     // Generate class to access the table fields
-    // The generated classes are like a view into a PackedByteArray,
-    // it decodes the data on access.
+    // The generated classes are a view into a PackedByteArray,
+    // will decode the data on access.
 
     GenComment(struct_def.doc_comment);
 
     //Generate Class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
     code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
     // GDScript likes to have empty constructors and cant do overloading.
@@ -604,11 +588,17 @@ class GdscriptGenerator : public BaseGenerator {
 
     // Generate presence funcs
     for (const auto &field : struct_def.fields.vec) {
+      code_.SetValue( "FIELD_NAME", Name( *field ) );
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
+        code_ += "# {{FIELD_NAME}} is deprecated\n";
         continue;
       }
-      code_.SetValue( "FIELD_NAME", Name( *field ) );
+      if( field->IsRequired() ){
+        // Required fields are always accessible.
+        code_ += "# {{FIELD_NAME}} is required\n";
+        continue;
+      }
       code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
       code_ += "func {{FIELD_NAME}}_is_present() -> bool:";
       code_.IncrementIdentLevel();
@@ -623,7 +613,40 @@ class GdscriptGenerator : public BaseGenerator {
         // Deprecated fields won't be accessible.
         continue;
       }
-      GenTableFieldAccess(*field);
+      code_.SetValue( "FIELD_NAME", Name(*field) );
+      code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+
+      const auto &type = field->value.type;
+
+      if( field->IsScalar() ){
+        SetTypeValues( type );
+        code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET_NAME}}) \\";
+        code_ += IsEnum( type ) ? "as {{GODOT_TYPE}}" : "";
+        code_.DecrementIdentLevel();
+      }
+      else if( IsString( type ) ){
+        SetTypeValues( type );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "return decode_string(start + {{OFFSET_NAME}})";
+        code_.DecrementIdentLevel();
+      }
+      else if( IsStruct( type ) || IsTable( type ) ){
+        SetTypeValues( type );
+        code_.SetValue("STRUCT_NAME", type.struct_def->name );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "return {{GODOT_TYPE}}.Get{{STRUCT_NAME}}(start + {{OFFSET_NAME}}, bytes)";
+        code_.DecrementIdentLevel();
+      }
+      else {
+        code_ += " #TODO - Unhandled Type";
+        GenFieldDebug( *field );
+      }
+      code_ += "";
     }
 
     // Generate Pretty Printer
