@@ -770,7 +770,10 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET_NAME}}) \\";
+        // TODO  if the field is not present then return the default value.
+        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+        code_ += "if not foffset: return " + field->value.constant;
+        code_ += "return bytes.{{DECODE_FUNC}}( start + foffset ) \\";
         code_ += IsEnum( type ) ? "as {{GODOT_TYPE}}" : "";
         code_.DecrementIdentLevel();
       }
