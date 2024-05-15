@@ -781,7 +781,10 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return decode_string(start + {{OFFSET_NAME}})";
+        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+        code_ += "if not foffset: return \"\"";
+        code_ += "var field_start = get_field_start( foffset )";
+        code_ += "return decode_string( field_start )";
         code_.DecrementIdentLevel();
       }
       else if( IsStruct( type ) || IsTable( type ) ){
@@ -789,7 +792,10 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue("STRUCT_NAME", type.struct_def->name );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return {{GODOT_TYPE}}.Get{{STRUCT_NAME}}(start + {{OFFSET_NAME}}, bytes)";
+        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+        code_ += "if not foffset: return null";
+        code_ += "var field_start = get_field_start( foffset )";
+        code_ += "return {{GODOT_TYPE}}.Get{{STRUCT_NAME}}( field_start, bytes )";
         code_.DecrementIdentLevel();
       }
       else if(IsSeries( type) ){
