@@ -188,7 +188,10 @@ class GdscriptGenerator : public BaseGenerator {
   std::string Name(const EnumVal &ev) const { return EscapeKeyword(ev.name); }
 
   std::string GetGodotType( const Type &type ){
-    if( IsEnum(type) ){
+    if( IsBool(type.base_type ) ){
+      return "bool";
+    }
+    else if( IsEnum(type) ){
       return type.enum_def->name;
     }
     else if( IsInteger(type.base_type) ){
