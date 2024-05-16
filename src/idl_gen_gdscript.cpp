@@ -564,127 +564,6 @@ class GdscriptGenerator : public BaseGenerator {
     }
   }
 
-  void GenTableFieldAccess(const FieldDef &field) {
-    code_.SetValue("FIELD_NAME", Name(field));
-    code_.SetValue("OFFSET_NAME", GenFieldOffsetName(field));
-    code_.SetValue("RETURN_TYPE", "BEANS");
-
-    const auto &type = field.value.type;
-
-    if( field.IsScalar() ){
-      if (IsEnum(type) ){
-        const auto &enum_def = *type.enum_def;
-        code_.SetValue("RETURN_TYPE", Name( enum_def ) );
-      } else {
-      }
-      code_ += "# {{FIELD_NAME}}: {{RETURN_TYPE}}";
-      code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-      code_ += "if not foffset: return {{DEFAULT}} as {{RETURN_TYPE}}";
-      code_ += "return bytes.{{DECODE_FUNC}}( start + foffset ) as {{RETURN_TYPE}}";
-      code_.DecrementIdentLevel();
-    }
-    else if( IsString(type) ){
-      code_ += "# {{FIELD_NAME}}: {{RETURN_TYPE}}";
-      code_ += "func {{FIELD_NAME}}() -> {{RETURN_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-      code_ += "if not foffset: return {{DEFAULT}}";
-      code_ += "return  {{DECODE_FUNC}}( get_field_start( foffset ) )";
-      code_.DecrementIdentLevel();
-    }
-    else if( IsStruct(type) || IsTable(type) ){
-      code_.SetValue("RETURN_TYPE", type.struct_def->name );
-      code_ += "# {{FIELD_NAME}}: {{RETURN_TYPE}}";
-      code_ += "func {{FIELD_NAME}}() -> {{PREFIX}}{{RETURN_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-      code_ += "if not foffset: return null";
-      code_ += "return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( get_field_start(foffset), bytes )";
-      code_.DecrementIdentLevel();
-    }
-    else if( IsSeries(type) ) {
-      GenFieldDebug(field);
-      code_.SetValue("DEFAULT", "0");
-
-      // Convenience Function to get the size of the array
-      code_ += "func {{FIELD_NAME}}_count() -> int:";
-      code_.IncrementIdentLevel();
-      code_ += "return get_array_count( {{OFFSET_NAME}} )";
-      code_.DecrementIdentLevel();
-      code_ += "";
-
-      if (IsVector(type)) {
-        if (IsVectorOfTable(type) || IsVectorOfStruct(type) ) {
-          if (type.struct_def) {
-            code_.SetValue("RETURN_TYPE", type.struct_def->name);
-          }
-          code_ += "# {{FIELD_NAME}}: [{{RETURN_TYPE}}]";
-          code_ += "func {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{RETURN_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return null";
-          code_ += "var array_start = get_field_start( foffset )";
-          code_ += "var element_start = get_array_element_start( array_start, index )";
-          code_ += "return {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}}( element_start, bytes )";
-          code_.DecrementIdentLevel();
-          code_ += "";
-
-          code_ += "func {{FIELD_NAME}}() -> FlatBufferArray:";
-          code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return null";
-          code_ += "var array_start = get_field_start( foffset )";
-          code_ += "return get_array( array_start, {{PREFIX}}{{RETURN_TYPE}}.Get{{RETURN_TYPE}} )";
-          code_.DecrementIdentLevel();
-          code_ += "";
-        }
-        else {
-          code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{RETURN_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return {{DEFAULT}}";
-          code_ += "var array_start = get_field_start( foffset )";
-          code_ += "var element_start = get_array_element_start( array_start, index )";
-          if( type.element == BASE_TYPE_STRING ){
-            code_ += "return {{DECODE_FUNC}}( element_start )";
-          } else {
-            code_ += "return bytes.{{DECODE_FUNC}}( element_start )";
-          }
-          code_.DecrementIdentLevel();
-          code_ += "";
-          code_ += "func {{FIELD_NAME}}() -> FlatBufferArray:";
-          code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return null";
-          code_ += "var array_start = get_field_start( foffset )";
-          if( type.element == BASE_TYPE_STRING ){
-            code_ += "return get_array( array_start, {{DECODE_FUNC}} )";
-          } else {
-            code_ += "return get_array( array_start, bytes.{{DECODE_FUNC}} )";
-          }
-          code_.DecrementIdentLevel();
-          code_ += "";
-        }
-        code_ += "# {{FIELD_NAME}}: Vector[{{RETURN_TYPE}}]";
-      }
-      else if (IsArray(type)) {
-        code_.SetValue("FIXED_LENGTH", NumToString(type.fixed_length));
-        code_ += "# has fixed_length: {{FIXED_LENGTH}}";
-        code_ += "# TODO Deal with Arrays";
-      }
-      else{
-        code_ += "# This is some unknown bullshit is what this is.";
-        GenFieldDebug(field);
-      }
-    } else {
-      code_ += "# TODO - Implement this type";
-      GenFieldDebug(field);
-    }
-    code_ += "";
-  }
-
   // Generate an accessor struct
   void GenTable(const StructDef &struct_def) {
     // Generate class to access the table fields
@@ -770,11 +649,11 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        // TODO  if the field is not present then return the default value.
         code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-        code_ += "if not foffset: return " + field->value.constant;
-        code_ += "return bytes.{{DECODE_FUNC}}( start + foffset ) \\";
-        code_ += IsEnum( type ) ? "as {{GODOT_TYPE}}" : "";
+        code_ += "if not foffset: return " + field->value.constant + "\\";
+        code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
+        code_ += "return bytes.{{DECODE_FUNC}}( start + foffset )\\";
+        code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
         code_.DecrementIdentLevel();
       }
       else if( IsString( type ) ){
@@ -796,6 +675,32 @@ class GdscriptGenerator : public BaseGenerator {
         code_ += "if not foffset: return null";
         code_ += "var field_start = get_field_start( foffset )";
         code_ += "return {{GODOT_TYPE}}.Get{{STRUCT_NAME}}( field_start, bytes )";
+        code_.DecrementIdentLevel();
+      }
+      else if( IsUnion(type) ){
+        code_ += "func {{FIELD_NAME}}():";
+        code_.IncrementIdentLevel();
+        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+        code_ += "if not foffset: return null";
+        code_ += "var field_start = get_field_start( foffset )";
+
+        // match the type
+        code_ += "match( {{FIELD_NAME}}_type() ):";
+        code_.IncrementIdentLevel();
+        code_.SetValue("ENUM_TYPE", type.enum_def->name );
+        for( const auto &val : type.enum_def->Vals() ){
+          if( val->IsZero() )continue;
+          code_.SetValue( "ENUM_VALUE", ToUpper( val->name ) );
+          code_.SetValue( "UNION_TYPE",  val->name );
+          code_.SetValue( "GODOT_TYPE", GetGodotType(val->union_type ) );
+          code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
+          code_.IncrementIdentLevel();
+          code_ += "return {{GODOT_TYPE}}.Get{{UNION_TYPE}}( field_start, bytes )";
+          code_.DecrementIdentLevel();
+        }
+        code_ += "_: pass";
+        code_.DecrementIdentLevel();
+        code_ += "return null";
         code_.DecrementIdentLevel();
       }
       else if(IsSeries( type) ){
