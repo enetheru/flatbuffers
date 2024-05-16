@@ -209,6 +209,9 @@ class GdscriptGenerator : public BaseGenerator {
     else if( IsTable( type ) ){
       return prefix + type.struct_def->name;
     }
+    else if( IsSeries( type ) ){
+      return "FlatBufferArray";
+    }
     else{
       return "TODO";
     }
@@ -736,6 +739,130 @@ class GdscriptGenerator : public BaseGenerator {
 //    code_ += "";
 
     // Decrement after the class definition
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    GenBuilders(struct_def);
+  }
+
+  void GenBuilders(const StructDef &struct_def) {
+    code_.SetValue("STRUCT_NAME", Name(struct_def));
+
+    // Generate a builder struct:
+    code_ += "class {{STRUCT_NAME}}Builder:";
+    code_.IncrementIdentLevel();
+    code_ += "# FIXME typedef {{STRUCT_NAME}} Table";
+    code_ += "var fbb_: FlatBufferBuilder";
+    code_ += "var start_ : int";
+    code_ += "";
+
+    for (const auto &field: struct_def.fields.vec ) {
+      if (field->deprecated) continue;
+      const bool is_scalar = IsScalar(field->value.type.base_type);
+      //FIXME implement the added default argument overload functions for gdscript so the below can be unstubbed
+      const bool is_default_scalar = false; //STUB = is_scalar && !field->IsScalarOptional();
+
+
+      std::string offset = GenFieldOffsetName(*field);
+      std::string name = Name(*field);
+      std::string value = is_default_scalar ? field->value.constant : "";
+
+      // Generate accessor functions of the form:
+      // void add_name(type name) {
+      //   fbb_.AddElement<type>(offset, name, default);
+      // }
+      code_.SetValue("FIELD_NAME", Name(*field));
+      code_.SetValue("FIELD_TYPE", GetGodotType( field->value.type ) );
+      code_.SetValue("ADD_OFFSET", Name(struct_def) + "." + offset);
+      code_.SetValue("ADD_NAME", name);
+      code_.SetValue("ADD_VALUE", value);
+      if (is_scalar) {
+        code_.SetValue("ADD_FN", std::string("add_element_") + TypeName(field->value.type.base_type));
+      } else if (IsStruct(field->value.type)) {
+        code_.SetValue("ADD_FN", "add_struct");
+      } else {
+        code_.SetValue("ADD_FN", "add_offset");
+      }
+
+      code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : {{FIELD_TYPE}} ):";
+      code_.IncrementIdentLevel();
+      code_ += "fbb_.{{ADD_FN}}( {{PREFIX}}{{ADD_OFFSET}}, {{ADD_NAME}}\\";
+      if (is_default_scalar) code_ += ", {{ADD_VALUE}}\\";
+      code_ += " )";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    }
+
+    // Builder constructor
+    code_ += "# \"constructor\"";
+    code_ += "static func {{STRUCT_NAME}}Builder( _fbb : FlatBufferBuilder ) -> {{STRUCT_NAME}}Builder:";
+    code_.IncrementIdentLevel();
+    code_ += "var new_builder = {{STRUCT_NAME}}Builder.new()";
+    code_ += "new_builder.fbb_ = _fbb";
+    code_ += "new_builder.start_ = _fbb.start_table()";
+    code_ += "return new_builder";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    // Finish() function.
+    code_ += "func finish() -> int:";
+    code_.IncrementIdentLevel();
+    code_ += "var end = fbb_.EndTable( start_ )";
+    code_ += "var o = end";
+
+    for (const auto &field : struct_def.fields.vec) {
+      if (!field->deprecated && field->IsRequired()) {
+        code_.SetValue("FIELD_NAME", Name(*field));
+        code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+        code_ += "fbb_.Required(o, {{PREFIX}}{{STRUCT_NAME}}.{{OFFSET_NAME}});";
+      }
+    }
+    code_ += "return o;";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    // Generate a convenient CreateX function that uses the above builder
+    // to create a table in one go.
+    code_ += "func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
+    code_.IncrementIdentLevel();
+    code_.IncrementIdentLevel();
+    code_.SetValue("SEP", "," );
+    bool add_sep = false;
+    for (const auto &field : struct_def.fields.vec) {
+      if( field->deprecated ) continue;
+      code_.SetValue("PARAM_NAME", Name(*field));
+      code_.SetValue("PARAM_VALUE", "default" );
+      code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
+      //FIXME add default value if possible.
+      if( add_sep ) code_ += "{{SEP}}";
+      code_ += "{{PARAM_NAME}} : {{PARAM_TYPE}}\\";
+      add_sep = true;
+    }
+    code_ += " ) -> int :";
+    code_.DecrementIdentLevel();
+    code_ += "var builder_ = {{STRUCT_NAME}}Builder.{{STRUCT_NAME}}Builder( _fbb );";
+    for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
+         size; size /= 2) {
+      for (auto it = struct_def.fields.vec.rbegin();
+           it != struct_def.fields.vec.rend(); ++it) {
+        const auto &field = **it;
+        if (!field.deprecated && (!struct_def.sortbysize ||
+                                  size == SizeOf(field.value.type.base_type))) {
+          code_.SetValue("FIELD_NAME", Name(field));
+          if (field.IsScalarOptional()) {
+            code_ +=
+                "if({{FIELD_NAME}}) { "
+                "builder_.add_{{FIELD_NAME}}(*{{FIELD_NAME}}); }";
+          } else {
+            code_ += "builder_.add_{{FIELD_NAME}}({{FIELD_NAME}});";
+          }
+        }
+      }
+    }
+    code_ += "return builder_.Finish();";
     code_.DecrementIdentLevel();
     code_ += "";
   }
