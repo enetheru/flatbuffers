@@ -110,12 +110,13 @@ class GdscriptGenerator : public BaseGenerator {
   // structs, and tables) and output them to a single file.
   bool generate() {
     code_.Clear();
-    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
-
     code_ += "# " + std::string(FlatBuffersGeneratedWarning());
     code_.SetValue( "FILE_NAME", file_name_ );
-    //FIXME do I make the root_table the base class object?
-    code_ += "class_name {{FILE_NAME}}\n";
+
+    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
+    code_.SetValue( "ROOT_NAME", Name( *parser_.root_struct_def_ ) );
+    code_ += "class_name {{PREFIX}}{{ROOT_NAME}} extends FlatBuffer";
+    code_ += "";
 
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
@@ -123,6 +124,10 @@ class GdscriptGenerator : public BaseGenerator {
         GenEnum(*enum_def);
       }
     }
+
+    // Put all the root table stuff first.
+    GenTable(*parser_.root_struct_def_ );
+    parser_.root_struct_def_->generated = true;
 
     // Generate code for all structs, then all tables.
     for (const auto &struct_def : parser_.structs_.vec) {
@@ -572,13 +577,16 @@ class GdscriptGenerator : public BaseGenerator {
     // Generate class to access the table fields
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
+    bool is_root = parser_.root_struct_def_ == &struct_def;
 
     GenComment(struct_def.doc_comment);
 
     //Generate Class definition
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
-    code_.IncrementIdentLevel();
+    if( ! is_root ) {
+      code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
+      code_.IncrementIdentLevel();
+    }
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
     code_ += "static func Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ) -> {{PREFIX}}{{STRUCT_NAME}}:";
@@ -738,8 +746,10 @@ class GdscriptGenerator : public BaseGenerator {
 //    code_.DecrementIdentLevel();
 //    code_ += "";
 
-    // Decrement after the class definition
-    code_.DecrementIdentLevel();
+    if( ! is_root ) {
+      // Decrement after the class definition
+      code_.DecrementIdentLevel();
+    }
     code_ += "";
 
     GenBuilders(struct_def);
