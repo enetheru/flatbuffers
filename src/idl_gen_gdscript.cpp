@@ -197,7 +197,7 @@ class GdscriptGenerator : public BaseGenerator {
       return "bool";
     }
     else if( IsEnum(type) ){
-      return type.enum_def->name;
+      return EscapeKeyword( type.enum_def->name );
     }
     else if( IsInteger(type.base_type) ){
       return "int";
@@ -209,16 +209,16 @@ class GdscriptGenerator : public BaseGenerator {
       return "String";
     }
     else if( IsStruct( type ) ){
-      return type.struct_def->name;
+      return EscapeKeyword( type.struct_def->name);
     }
     else if( IsTable( type ) ){
-      return type.struct_def->name;
+      return EscapeKeyword(type.struct_def->name);
     }
     else if( IsSeries( type ) ){
       return "FlatBufferArray";
     }
     else if( IsUnion( type ) ){
-      return "Union";
+      return "FlatBuffer";
     }
     else{
       return "TODO";
@@ -855,7 +855,7 @@ class GdscriptGenerator : public BaseGenerator {
       code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
       //FIXME add default value if possible.
       if( add_sep ) code_ += "{{SEP}}";
-      code_ += "{{PARAM_NAME}} : \\";
+      code_ += "{{PARAM_NAME}}_ : \\";
       if( IsTable( field->value.type )
           || IsStruct( field->value.type ) ){
         code_ += "{{PREFIX}}{{PARAM_TYPE}}\\";
@@ -878,9 +878,9 @@ class GdscriptGenerator : public BaseGenerator {
           if (field.IsScalarOptional()) {
             code_ +=
                 "if({{FIELD_NAME}}) { "
-                "builder.add_{{FIELD_NAME}}(*{{FIELD_NAME}}); }";
+                "builder.add_{{FIELD_NAME}}(*{{FIELD_NAME}}_); }";
           } else {
-            code_ += "builder.add_{{FIELD_NAME}}({{FIELD_NAME}});";
+            code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_ );";
           }
         }
       }
