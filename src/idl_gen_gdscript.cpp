@@ -759,12 +759,20 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
 
     // Generate a builder struct:
-    code_ += "class {{STRUCT_NAME}}Builder:";
+    code_ += "class {{STRUCT_NAME}}Builder extends RefCounted:";
     code_.IncrementIdentLevel();
-    code_ += "# FIXME typedef {{STRUCT_NAME}} Table";
     code_ += "var fbb_: FlatBufferBuilder";
     code_ += "var start_ : int";
     code_ += "";
+
+    // Add init function
+    code_ += "func _init( _fbb : FlatBufferBuilder ):";
+    code_.IncrementIdentLevel();
+    code_ += "fbb_ = _fbb";
+    code_ += "start_ = _fbb.start_table()";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
 
     for (const auto &field: struct_def.fields.vec ) {
       if (field->deprecated) continue;
@@ -803,21 +811,10 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "";
     }
 
-    // Builder constructor
-    code_ += "# \"constructor\"";
-    code_ += "static func {{STRUCT_NAME}}Builder( _fbb : FlatBufferBuilder ) -> {{STRUCT_NAME}}Builder:";
-    code_.IncrementIdentLevel();
-    code_ += "var new_builder = {{STRUCT_NAME}}Builder.new()";
-    code_ += "new_builder.fbb_ = _fbb";
-    code_ += "new_builder.start_ = _fbb.start_table()";
-    code_ += "return new_builder";
-    code_.DecrementIdentLevel();
-    code_ += "";
-
     // Finish() function.
     code_ += "func finish() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "var end = fbb_.EndTable( start_ )";
+    code_ += "var end = fbb_.end_table( start_ )";
     code_ += "var o = end";
 
     for (const auto &field : struct_def.fields.vec) {
@@ -836,7 +833,7 @@ class GdscriptGenerator : public BaseGenerator {
 
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
-    code_ += "func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
+    code_ += "static func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
     code_.SetValue("SEP", "," );
@@ -853,7 +850,7 @@ class GdscriptGenerator : public BaseGenerator {
     }
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
-    code_ += "var builder_ = {{STRUCT_NAME}}Builder.{{STRUCT_NAME}}Builder( _fbb );";
+    code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
     for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
          size; size /= 2) {
       for (auto it = struct_def.fields.vec.rbegin();
@@ -865,14 +862,14 @@ class GdscriptGenerator : public BaseGenerator {
           if (field.IsScalarOptional()) {
             code_ +=
                 "if({{FIELD_NAME}}) { "
-                "builder_.add_{{FIELD_NAME}}(*{{FIELD_NAME}}); }";
+                "builder.add_{{FIELD_NAME}}(*{{FIELD_NAME}}); }";
           } else {
-            code_ += "builder_.add_{{FIELD_NAME}}({{FIELD_NAME}});";
+            code_ += "builder.add_{{FIELD_NAME}}({{FIELD_NAME}});";
           }
         }
       }
     }
-    code_ += "return builder_.Finish();";
+    code_ += "return builder.finish();";
     code_.DecrementIdentLevel();
     code_ += "";
   }
