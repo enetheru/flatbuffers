@@ -22,7 +22,6 @@ static inline std::string ToUpper(std::string val) {
 }
 
 namespace gdscript {
-const std::string prefix = "FB_";
 const char *decode_funcs[] = {
 "",               // 0 NONE
 "decode_u8",      // 1 UTYPE
@@ -97,6 +96,7 @@ class GdscriptGenerator : public BaseGenerator {
       "NAN",
       // Builtin Classes
       "Color",
+      "Object",
       // My used keywords
       "bytes",
       "start",
@@ -110,12 +110,11 @@ class GdscriptGenerator : public BaseGenerator {
   // structs, and tables) and output them to a single file.
   bool generate() {
     code_.Clear();
-    code_ += "# " + std::string(FlatBuffersGeneratedWarning());
+    code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_.SetValue( "FILE_NAME", file_name_ );
+    keywords_.insert( file_name_ );
 
-    code_.SetValue( "PREFIX", "FB_"); //FIXME tie this to some option
-    code_.SetValue( "ROOT_NAME", Name( *parser_.root_struct_def_ ) );
-    code_ += "class_name {{PREFIX}}{{ROOT_NAME}} extends FlatBuffer";
+    code_ += "class_name {{FILE_NAME}}";
     code_ += "";
 
     // Generate code for all the enum declarations.
@@ -124,10 +123,6 @@ class GdscriptGenerator : public BaseGenerator {
         GenEnum(*enum_def);
       }
     }
-
-    // Put all the root table stuff first.
-    GenTable(*parser_.root_struct_def_ );
-    parser_.root_struct_def_->generated = true;
 
     // Generate code for all structs, then all tables.
     for (const auto &struct_def : parser_.structs_.vec) {
@@ -403,23 +398,24 @@ class GdscriptGenerator : public BaseGenerator {
     // Generate class to access the structs fields
     // The generated classes are like a view into a PackedByteArray,
     // it decodes the data on access.
-
     GenComment(struct_def.doc_comment);
-    // Generate the class definition
-    code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_ += "class {{PREFIX}}{{STRUCT_NAME}} extends FlatBuffer:";
-    code_.IncrementIdentLevel();
 
+    code_.SetValue("STRUCT_NAME", Name(struct_def));
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
     code_ += "static func Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ):";
     code_.IncrementIdentLevel();
-    code_ += "var new_{{STRUCT_NAME}} = {{PREFIX}}{{STRUCT_NAME}}.new()";
+    code_ += "var new_{{STRUCT_NAME}} = {{STRUCT_NAME}}.new()";
     code_ += "new_{{STRUCT_NAME}}.start = _start";
     code_ += "new_{{STRUCT_NAME}}.bytes = _bytes";
     code_ += "return new_{{STRUCT_NAME}}";
     code_.DecrementIdentLevel();
     code_ += "";
+
+    // Generate the class definition
+
+    code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
+    code_.IncrementIdentLevel();
 
     // Generate the accessor functions, in the form:
     // func name() -> type :
@@ -445,9 +441,9 @@ class GdscriptGenerator : public BaseGenerator {
       else if( IsStruct( type) ){
         code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
         code_.SetValue("STRUCT_NAME", Name( struct_def ) );
-        code_ += "func {{FIELD_NAME}}() -> {{PREFIX}}{{GODOT_TYPE}}:";
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return {{PREFIX}}{{GODOT_TYPE}}.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_ += "return {{FILE_NAME}}.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
         code_.DecrementIdentLevel();
       }
       else {
@@ -517,13 +513,13 @@ class GdscriptGenerator : public BaseGenerator {
     else if( IsStruct(type) || IsTable( type ) ){
       code_.SetValue("STRUCT_NAME", Name( *type.struct_def ) );
 
-      code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{PREFIX}}{{GODOT_TYPE}}:";
+      code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
       code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
       code_ += "if not foffset: return null";
       code_ += "var array_start = get_field_start( foffset )";
       code_ += "var element_start = get_array_element_start( array_start, index )";
-      code_ += "return {{PREFIX}}{{GODOT_TYPE}}.Get{{STRUCT_NAME}}( element_start, bytes )";
+      code_ += "return {{FILE_NAME}}.Get{{STRUCT_NAME}}( element_start, bytes )";
       code_.DecrementIdentLevel();
       code_ += "";
 
@@ -532,7 +528,7 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
       code_ += "if not foffset: return null";
       code_ += "var array_start = get_field_start( foffset )";
-      code_ += "return get_array( array_start, {{PREFIX}}{{GODOT_TYPE}}.Get{{STRUCT_NAME}} )";
+      code_ += "return get_array( array_start, {{FILE_NAME}}.Get{{STRUCT_NAME}} )";
       code_.DecrementIdentLevel();
       code_ += "";
     }
@@ -580,26 +576,26 @@ class GdscriptGenerator : public BaseGenerator {
     // Generate class to access the table fields
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
-    bool is_root = parser_.root_struct_def_ == &struct_def;
 
     GenComment(struct_def.doc_comment );
 
     //Generate Class definition
     code_.SetValue("TABLE_NAME", Name(struct_def ) );
-    if( ! is_root ) {
-      code_ += "class {{PREFIX}}{{TABLE_NAME}} extends FlatBuffer:";
-      code_.IncrementIdentLevel();
-    }
+
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
-    code_ += "static func Get{{TABLE_NAME}}( _start : int, _bytes : PackedByteArray ) -> {{PREFIX}}{{TABLE_NAME}}:";
+    code_ += "static func Get{{TABLE_NAME}}( _start : int, _bytes : PackedByteArray ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
-    code_ += "var new_{{TABLE_NAME}} = {{PREFIX}}{{TABLE_NAME}}.new()";
+    code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
     code_ += "new_{{TABLE_NAME}}.start = _start";
     code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
     code_ += "return new_{{TABLE_NAME}}";
     code_ += "";
     code_.DecrementIdentLevel();
+    code_ += "";
+
+    code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
+    code_.IncrementIdentLevel();
 
     // Generate field id constants.
     if (!struct_def.fields.vec.empty()) {
@@ -682,12 +678,12 @@ class GdscriptGenerator : public BaseGenerator {
       }
       else if( IsStruct( type ) || IsTable( type ) ){
         code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
-        code_ += "func {{FIELD_NAME}}() -> {{PREFIX}}{{GODOT_TYPE}}:";
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
         code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
         code_ += "if not foffset: return null";
         code_ += "var field_start = get_field_start( foffset )";
-        code_ += "return {{PREFIX}}{{GODOT_TYPE}}.Get{{GODOT_TYPE}}( field_start, bytes )";
+        code_ += "return {{FILE_NAME}}.Get{{GODOT_TYPE}}( field_start, bytes )";
         code_.DecrementIdentLevel();
       }
       else if( IsUnion(type) ){
@@ -708,7 +704,7 @@ class GdscriptGenerator : public BaseGenerator {
           code_.SetValue( "GODOT_TYPE", GetGodotType(val->union_type ) );
           code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
           code_.IncrementIdentLevel();
-          code_ += "return {{PREFIX}}{{GODOT_TYPE}}.Get{{UNION_TYPE}}( field_start, bytes )";
+          code_ += "return {{FILE_NAME}}.Get{{UNION_TYPE}}( field_start, bytes )";
           code_.DecrementIdentLevel();
         }
         code_ += "_: pass";
@@ -750,10 +746,8 @@ class GdscriptGenerator : public BaseGenerator {
     code_.DecrementIdentLevel();
     code_ += "";
 
-    if( ! is_root ) {
-      // Decrement after the class definition
-      code_.DecrementIdentLevel();
-    }
+    // Decrement after the class definition
+    code_.DecrementIdentLevel();
     code_ += "";
 
     GenBuilders(struct_def);
@@ -809,12 +803,12 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : \\";
       if( IsStruct(field->value.type)
           || IsTable( field->value.type ) ){
-        code_ += "{{PREFIX}}{{FIELD_TYPE}} ):";
+        code_ += "{{FIELD_TYPE}} ):";
       } else{
         code_ += "{{FIELD_TYPE}} ):";
       }
       code_.IncrementIdentLevel();
-      code_ += "fbb_.{{ADD_FN}}( {{PREFIX}}{{ADD_OFFSET}}, {{ADD_NAME}}\\";
+      code_ += "fbb_.{{ADD_FN}}( {{ADD_OFFSET}}, {{ADD_NAME}}\\";
       if (is_default_scalar) code_ += ", {{ADD_VALUE}}\\";
       code_ += " )";
       code_.DecrementIdentLevel();
@@ -831,7 +825,7 @@ class GdscriptGenerator : public BaseGenerator {
       if (!field->deprecated && field->IsRequired()) {
         code_.SetValue("FIELD_NAME", Name(*field));
         code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
-        code_ += "fbb_.Required(o, {{PREFIX}}{{STRUCT_NAME}}.{{OFFSET_NAME}});";
+        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.{{OFFSET_NAME}});";
       }
     }
     code_ += "return o;";
@@ -858,7 +852,7 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "{{PARAM_NAME}}_ : \\";
       if( IsTable( field->value.type )
           || IsStruct( field->value.type ) ){
-        code_ += "{{PREFIX}}{{PARAM_TYPE}}\\";
+        code_ += "{{PARAM_TYPE}}\\";
       } else{
         code_ += "{{PARAM_TYPE}}\\";
       }
