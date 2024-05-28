@@ -723,10 +723,10 @@ class GdscriptGenerator : public BaseGenerator {
     }
 
     // Generate Pretty Printer
-    code_ += "func pprint( pp : PP, heading = \"\"):";
+    code_ += "func pprint( printer : FlatBufferPrinter, heading = \"\"):";
     code_.IncrementIdentLevel();
-    code_ += "pp.rint(\"{{TABLE_NAME}} {\", heading)";
-    code_ += "pp.indent()";
+    code_ += "printer.print(\"{{TABLE_NAME}} {\", heading)";
+    code_ += "printer.indent()";
     for (const auto &field : struct_def.fields.vec) {
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
@@ -738,11 +738,11 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += field->IsRequired() ? "(required)" : "";
       code_ += "if {{FIELD_NAME}}_is_present():";
       code_.IncrementIdentLevel();
-      code_ += "pp.rint( self.{{FIELD_NAME}}(), \"{{FIELD_NAME}}\" )";
+      code_ += "printer.print( self.{{FIELD_NAME}}(), \"{{FIELD_NAME}}\" )";
       code_.DecrementIdentLevel();
     }
-    code_ += "pp.outdent()";
-    code_ += "pp.rint(\"}\")";
+    code_ += "printer.outdent()";
+    code_ += "printer.print(\"}\")";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -802,8 +802,10 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : \\";
       if( IsStruct(field->value.type)
-          || IsTable( field->value.type ) ){
-        code_ += "{{FIELD_TYPE}} ):";
+          || IsTable( field->value.type )
+          || IsString( field->value.type )
+          ){
+        code_ += "int ):";
       } else{
         code_ += "{{FIELD_TYPE}} ):";
       }
@@ -851,8 +853,10 @@ class GdscriptGenerator : public BaseGenerator {
       if( add_sep ) code_ += "{{SEP}}";
       code_ += "{{PARAM_NAME}}_ : \\";
       if( IsTable( field->value.type )
-          || IsStruct( field->value.type ) ){
-        code_ += "{{PARAM_TYPE}}\\";
+          || IsStruct( field->value.type )
+          || IsString( field->value.type )
+          ){
+        code_ += "int\\";
       } else{
         code_ += "{{PARAM_TYPE}}\\";
       }
