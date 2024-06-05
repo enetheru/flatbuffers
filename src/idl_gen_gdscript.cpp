@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "flatbuffers/base.h"
 #include "flatbuffers/code_generators.h"
@@ -58,7 +59,7 @@ class GdscriptGenerator : public BaseGenerator {
   GdscriptGenerator(const Parser &parser, const std::string &path,
                const std::string &file_name, IDLOptionsGdscript opts)
       : BaseGenerator(parser, path, file_name, "", "::", "gd"),
-        opts_(opts)
+        opts_(std::move(opts))
   {
     static const char *const keywords[] = {
       "if",
@@ -108,7 +109,7 @@ class GdscriptGenerator : public BaseGenerator {
 
   // Iterate through all definitions we haven't. Generate code for (enums,
   // structs, and tables) and output them to a single file.
-  bool generate() {
+  bool generate() override {
     code_.Clear();
     code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_.SetValue( "FILE_NAME", file_name_ );
@@ -203,11 +204,8 @@ class GdscriptGenerator : public BaseGenerator {
     else if( IsString( type ) ){
       return "String";
     }
-    else if( IsStruct( type ) ){
+    else if( IsStruct( type ) || IsTable( type ) ){
       return EscapeKeyword( type.struct_def->name);
-    }
-    else if( IsTable( type ) ){
-      return EscapeKeyword(type.struct_def->name);
     }
     else if( IsSeries( type ) ){
       return "FlatBufferArray";
@@ -220,7 +218,7 @@ class GdscriptGenerator : public BaseGenerator {
     }
   }
 
-  bool HasNativeArray( const Type &type ){
+  static bool HasNativeArray( const Type &type ){
     switch( type.base_type ){
       case BASE_TYPE_UCHAR:
       case BASE_TYPE_INT:
@@ -268,7 +266,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += field.key ? "true" : "false";
 
 //    bool shared;  // Field will be using string pooling (i.e. CreateSharedString)
-//                         // as default serialization behavior if field is a string.
+//                         // as default serialisation behaviour if field is a string.
     code_ += "#  shared = \\";
     code_ += field.shared ? "true" : "false";
 
@@ -353,8 +351,8 @@ class GdscriptGenerator : public BaseGenerator {
 //      bool is_union;
       code_ += "#  is_union: \\";
       code_ += enum_def.is_union ? "true" : "false";
-//      // Type is a union which uses type aliases where at least one type is
-//      // available under two different names.
+//      type is a union which uses type aliases where at least one type is
+//        available under two different names.
 //      bool uses_multiple_type_instances;
       code_ += "#  uses_multiple_type_instances: \\";
       code_ += enum_def.uses_multiple_type_instances ? "true" : "false";
@@ -950,21 +948,21 @@ class GdscriptCodeGenerator : public CodeGenerator {
     return Status::NOT_IMPLEMENTED;
   }
 
-  bool IsSchemaOnly() const override { return true; }
+  [[nodiscard]] bool IsSchemaOnly() const override { return true; }
 
-  bool SupportsBfbsGeneration() const override { return false; }
+  [[nodiscard]] bool SupportsBfbsGeneration() const override { return false; }
 
-  bool SupportsRootFileGeneration() const override { return false; }
+  [[nodiscard]] bool SupportsRootFileGeneration() const override { return false; }
 
-  IDLOptions::Language Language() const override { return IDLOptions::kCpp; }
+  [[nodiscard]] IDLOptions::Language Language() const override { return IDLOptions::kCpp; }
 
-  std::string LanguageName() const override { return "GDScript"; }
+  [[nodiscard]] std::string LanguageName() const override { return "GDScript"; }
 };
 
 }  // namespace
 
 std::unique_ptr<CodeGenerator> NewGDScriptCodeGenerator() {
-  return std::unique_ptr<GdscriptCodeGenerator>(new GdscriptCodeGenerator());
+  return std::make_unique<GdscriptCodeGenerator>();
 }
 
 }  // namespace flatbuffers
