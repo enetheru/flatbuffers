@@ -853,40 +853,30 @@ class GdscriptGenerator : public BaseGenerator {
     bool add_sep = false;
     for (const auto &field : struct_def.fields.vec) {
       if( field->deprecated ) continue;
-      code_.SetValue("PARAM_NAME", Name(*field));
+      code_.SetValue("PARAM_NAME", Name(*field) + (field->IsScalar() ? "_" : "_offset") );
       code_.SetValue("PARAM_VALUE", "default" );
       code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
       //FIXME add default value if possible.
       if( add_sep ) code_ += "{{SEP}}";
-      code_ += "{{PARAM_NAME}}_ : \\";
-      if( IsTable( field->value.type )
-          || IsStruct( field->value.type )
-          || IsString( field->value.type )
-          ){
-        code_ += "int\\";
+      if( field->IsScalar() ) {
+        code_ += "{{PARAM_NAME}} : {{PARAM_TYPE}}\\";
       } else{
-        code_ += "{{PARAM_TYPE}}\\";
+        code_ += "{{PARAM_NAME}} : int\\";
       }
       add_sep = true;
     }
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
+
+    // Create* function body
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
-    for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
-         size; size /= 2) {
-      for (auto it = struct_def.fields.vec.rbegin();
-           it != struct_def.fields.vec.rend(); ++it) {
+    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
+      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
         const auto &field = **it;
-        if (!field.deprecated && (!struct_def.sortbysize ||
-                                  size == SizeOf(field.value.type.base_type))) {
+        if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
           code_.SetValue("FIELD_NAME", Name(field));
-          if (field.IsScalarOptional()) {
-            code_ +=
-                "if({{FIELD_NAME}}) { "
-                "builder.add_{{FIELD_NAME}}(*{{FIELD_NAME}}_); }";
-          } else {
-            code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_ );";
-          }
+          code_.SetValue("PARAM_NAME", Name(field) + (field.IsScalar() ? "_" : "_offset") );
+          code_ += "builder.add_{{FIELD_NAME}}( {{PARAM_NAME}} );";
         }
       }
     }
