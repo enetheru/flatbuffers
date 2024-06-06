@@ -22,6 +22,14 @@ static inline std::string ToUpper(std::string val) {
   return val;
 }
 
+// Make the string upper case
+static inline std::string ToLower(std::string val) {
+  std::locale loc;
+  auto &facet = std::use_facet<std::ctype<char>>(loc);
+  facet.tolower(&val[0], &val[0] + val.length());
+  return val;
+}
+
 namespace gdscript {
 const char *decode_funcs[] = {
 "",               // 0 NONE
@@ -61,6 +69,14 @@ class GdscriptGenerator : public BaseGenerator {
       : BaseGenerator(parser, path, file_name, "", "::", "gd"),
         opts_(std::move(opts))
   {
+    code_.SetPadding("\t");
+
+    static const char *const variant_types[] = {
+      "Vector3",
+      nullptr
+    };
+    for (auto kw = variant_types; *kw; kw++) variant_types_.insert(*kw);
+
     static const char *const keywords[] = {
       "if",
       "elif",
@@ -95,16 +111,12 @@ class GdscriptGenerator : public BaseGenerator {
       "TAU",
       "INF",
       "NAN",
-      // Builtin Classes
-      "Color",
-      "Object",
       // My used keywords
       "bytes",
       "start",
       nullptr,
     };
     for (auto kw = keywords; *kw; kw++) keywords_.insert(*kw);
-    code_.SetPadding("\t");
   }
 
   // Iterate through all definitions we haven't. Generate code for (enums,
@@ -158,11 +170,19 @@ class GdscriptGenerator : public BaseGenerator {
   CodeWriter code_;
 
   std::unordered_set<std::string> keywords_;
+  std::unordered_set<std::string> variant_types_;
 
   const IDLOptionsGdscript opts_;
 
   std::string EscapeKeyword(const std::string &name) const {
     return keywords_.find(name) == keywords_.end() ? name : name + "_";
+  }
+
+  bool IsVariant( const Type &type ){
+    if( type.struct_def ) {
+      return variant_types_.find(type.struct_def->name) != variant_types_.end();
+    }
+    return false;
   }
 
   std::string Name(const FieldDef &field) const {
@@ -674,13 +694,27 @@ class GdscriptGenerator : public BaseGenerator {
         code_.DecrementIdentLevel();
       }
       else if( IsString( type ) ){
-        code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
+        auto godot_type = GetGodotType(type);
+        code_.SetValue( "GODOT_TYPE", godot_type );
+        code_.SetValue( "DECODE_FUNC", "decode_string" );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
         code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-        code_ += "if not foffset: return \"\"";
+        code_ += "if not foffset: return {{GODOT_TYPE}}()";
         code_ += "var field_start = get_field_start( foffset )";
-        code_ += "return decode_string( field_start )";
+        code_ += "return {{DECODE_FUNC}}( field_start )";
+        code_.DecrementIdentLevel();
+      }
+      else if( IsVariant( type ) ){
+        auto godot_type = GetGodotType(type);
+        code_.SetValue( "GODOT_TYPE", godot_type );
+        code_.SetValue( "DECODE_FUNC", "decode_" + ToLower(godot_type) );
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+        code_ += "if not foffset: return {{GODOT_TYPE}}()";
+        code_ += "var field_start = get_field_start( foffset )";
+        code_ += "return {{DECODE_FUNC}}( field_start )";
         code_.DecrementIdentLevel();
       }
       else if( IsStruct( type ) || IsTable( type ) ){
