@@ -118,6 +118,15 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "class_name {{FILE_NAME}}";
     code_ += "";
 
+    // convenience function to get the root table without having to pass its position
+    code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
+    code_ += "func GetRoot( data : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+    code_.IncrementIdentLevel();
+    code_ += "return Get{{ROOT_STRUCT}}( data.decode_u32(0), data )";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
       if (!enum_def->generated) {
