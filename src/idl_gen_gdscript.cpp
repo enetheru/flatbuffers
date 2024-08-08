@@ -73,6 +73,7 @@ class GdscriptGenerator : public BaseGenerator {
 
     static const char *const variant_types[] = {
       "Vector3",
+      "Color",
       nullptr
     };
     for (auto kw = variant_types; *kw; kw++) variant_types_.insert(*kw);
@@ -835,8 +836,6 @@ class GdscriptGenerator : public BaseGenerator {
       code_.SetValue("ADD_VALUE", value);
       if (is_scalar) {
         code_.SetValue("ADD_FN", std::string("add_element_") + TypeName(field->value.type.base_type));
-      } else if (IsStruct(field->value.type)) {
-        code_.SetValue("ADD_FN", "add_struct");
       } else {
         code_.SetValue("ADD_FN", "add_offset");
       }
