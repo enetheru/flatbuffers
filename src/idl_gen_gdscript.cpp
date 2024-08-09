@@ -793,6 +793,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "";
 
     GenBuilders(struct_def);
+    GenCreateFunc( struct_def );
   }
 
   void GenBuilders(const StructDef &struct_def) {
@@ -875,7 +876,9 @@ class GdscriptGenerator : public BaseGenerator {
 
     code_.DecrementIdentLevel();
     code_ += "";
+  }
 
+  void GenCreateFunc( const StructDef &struct_def ){
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
     code_ += "static func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
