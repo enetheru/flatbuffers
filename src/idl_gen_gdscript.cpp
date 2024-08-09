@@ -841,12 +841,11 @@ class GdscriptGenerator : public BaseGenerator {
       }
 
       code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : \\";
-      if( IsStruct(field->value.type)
-          || IsTable( field->value.type )
-          || IsString( field->value.type )
-          ){
+      // IsVectorOfStruct(field->value.type)
+      if (IsStruct(field->value.type) || IsTable(field->value.type) ||
+          IsString(field->value.type) || IsSeries(field->value.type)) {
         code_ += "int ):";
-      } else{
+      } else {
         code_ += "{{FIELD_TYPE}} ):";
       }
       code_.IncrementIdentLevel();
