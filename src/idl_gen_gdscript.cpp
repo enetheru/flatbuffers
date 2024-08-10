@@ -235,7 +235,7 @@ class GdscriptGenerator : public BaseGenerator {
       return "String";
     }
     else if( IsStruct( type ) || IsTable( type ) ){
-      return EscapeKeyword( type.struct_def->name);
+      return EscapeKeyword( type.struct_def->name );
     }
     else if( IsSeries( type ) ){
       if( IsScalar(type.element) ){
@@ -255,7 +255,7 @@ class GdscriptGenerator : public BaseGenerator {
       return "Array";
     }
     else if( IsUnion( type ) ){
-      return "FlatBuffer";
+      return "Variant";
     }
     else{
       return "TODO";
@@ -834,42 +834,48 @@ class GdscriptGenerator : public BaseGenerator {
 
     for( const auto &field : struct_def.fields.vec ){
       if( field->deprecated ) continue;
-      const bool is_scalar = IsScalar(field->value.type.base_type);
-      // FIXME implement the added default argument overload functions for gdscript so the below can be un-stubbed
-      const bool is_default_scalar = is_scalar && !field->IsScalarOptional();
 
+      const bool is_scalar = IsScalar(field->value.type.base_type);
+      const bool is_default_scalar = is_scalar && !field->IsScalarOptional();
+      std::string field_name = Name(*field);
+      std::string struct_name = Name(struct_def);
       std::string offset = GenFieldOffsetName(*field);
-      std::string name = Name(*field);
       std::string default_ = is_default_scalar ? field->value.constant : "";
 
-      // Generate accessor functions of the form:
-      // void add_name(type name) {
-      //   fbb_.AddElement<type>(offset, name, default);
-      // }
-      code_.SetValue("FIELD_NAME", Name(*field));
-      code_.SetValue("FIELD_TYPE", GetGodotType(field->value.type));
-      code_.SetValue("ADD_OFFSET", Name(struct_def) + "." + offset);
-      code_.SetValue("ADD_NAME", name);
-      code_.SetValue("ADD_DEFAULT", default_);
-      if (is_scalar) {
-        code_.SetValue("ADD_FN", std::string("add_element_") +
-                                     TypeName(field->value.type.base_type));
+
+      // Generate accessor functions of the forms:
+      // Scalars
+      // func add_{{FIELD_NAME}}( {{FIELD_NAME}} : {{GODOT_TYPE}} ) -> void:
+      //   fbb_.add_element_{{GODOT_TYPE}}_default( {{FIELD_OFFSET}}, {{FIELD_NAME}}, {{VALUE_DEFAULT}});
+
+      // Non-Scalars
+      // func add_{{FIELD_NAME}}( {{FIELD_NAME}}_offset : int ) -> void:
+      //   fbb_.add_offset( {{FIELD_OFFSET}, {{FIELD_NAME}}}
+
+      code_.SetValue("FIELD_NAME", field_name );
+      code_.SetValue("FIELD_OFFSET", struct_name + "." + offset);
+      code_.SetValue("GODOT_TYPE", GetGodotType(field->value.type));
+      code_.SetValue("VALUE_DEFAULT", default_ );
+      if( IsEnum(field->value.type) ){
+        code_.SetValue("TYPE_NAME", "ubyte" ); // enums are interpreted as a ubyte
       } else {
-        code_.SetValue("ADD_FN", "add_offset");
+        code_.SetValue("TYPE_NAME", TypeName(field->value.type.base_type));
       }
 
-      code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : \\";
-      // IsVectorOfStruct(field->value.type)
-      if (IsStruct(field->value.type) || IsTable(field->value.type) ||
-          IsString(field->value.type) || IsSeries(field->value.type)) {
-        code_ += "int ):";
+      // Function Signature
+      if (is_scalar) {
+        code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}} : {{GODOT_TYPE}} ) -> void:";
       } else {
-        code_ += "{{FIELD_TYPE}} ):";
+        code_ += "func add_{{FIELD_NAME}}( {{FIELD_NAME}}_offset : int ) -> void:";
       }
       code_.IncrementIdentLevel();
-      code_ += "fbb_.{{ADD_FN}}( {{ADD_OFFSET}}, {{ADD_NAME}}\\";
-      if (is_default_scalar) code_ += ", {{ADD_VALUE}}\\";
-      code_ += " )";
+      // Function Body
+      if( is_scalar ){
+        code_ +=
+            "fbb_.add_element_{{TYPE_NAME}}_default( {{FIELD_OFFSET}}, {{FIELD_NAME}}, {{VALUE_DEFAULT}} )";
+      } else {
+        code_ += "fbb_.add_offset( {{FIELD_OFFSET}}, {{FIELD_NAME}}_offset )";
+      }
       code_.DecrementIdentLevel();
       code_ += "";
     }
