@@ -45,7 +45,7 @@ const char *decode_funcs[] = {
 "decode_u64",     //10 ULONG
 "decode_float",   //11 FLOAT
 "decode_double",  //12 DOUBLE
-"decode_string",  //13 STRING
+"decode_String",  //13 STRING
 "",               //14 VECTOR
 "",               //15 STRUCT
 "",               //16 UNION
@@ -238,7 +238,21 @@ class GdscriptGenerator : public BaseGenerator {
       return EscapeKeyword( type.struct_def->name);
     }
     else if( IsSeries( type ) ){
-      return "FlatBufferArray";
+      if( IsScalar(type.element) ){
+        switch( type.element ){
+          case BASE_TYPE_CHAR:
+          case BASE_TYPE_UCHAR: return "PackedByteArray";
+          case BASE_TYPE_INT:
+          case BASE_TYPE_UINT: return "PackedInt32Array";
+          case BASE_TYPE_LONG:
+          case BASE_TYPE_ULONG: return "PackedInt64Array";
+          case BASE_TYPE_FLOAT: return "PackedFloat32Array";
+          case BASE_TYPE_DOUBLE: return "PackedFloat64Array";
+          case BASE_TYPE_STRING: return "PackedStringArray";
+          default:break;
+        }
+      }
+      return "Array";
     }
     else if( IsUnion( type ) ){
       return "FlatBuffer";
@@ -486,6 +500,7 @@ class GdscriptGenerator : public BaseGenerator {
 
   void GenSeriesAccessors( const FieldDef &field ){
     // Convenience Function to get the size of the array
+    code_ += "# Accessors for {{FIELD_NAME}}";
     code_ += "func {{FIELD_NAME}}_count() -> int:";
     code_.IncrementIdentLevel();
     code_ += "return get_array_count( {{OFFSET_NAME}} )";
@@ -493,28 +508,31 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "";
 
 
-    const auto type = field.value.type.VectorType();
-    code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
-    code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
-    if( IsScalar(type.base_type ) ){
-      code_ +="func {{FIELD_NAME}}_get( index : int ) -> {{GODOT_TYPE}}:";
+    const auto type = field.value.type;
+    const auto element = type.VectorType();
+
+    code_.SetValue( "GODOT_TYPE", GetGodotType( type ) );
+    code_.SetValue( "GODOT_ELEMENT", GetGodotType( element ) );
+    code_.SetValue("DECODE_FUNC", decode_funcs[ element.base_type ] );
+    if( IsScalar(type.element ) ){
+      code_ +="func {{FIELD_NAME}}_at( index : int ) -> {{GODOT_ELEMENT}}:";
       code_.IncrementIdentLevel();
       code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
       code_ += "if not foffset: return 0\\";
-      code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
+      code_ += IsEnum( type ) ? " as {{GODOT_ELEMENT}}" : "";
       code_ += "var array_start = get_field_start( foffset )";
       code_ += "var element_start = get_array_element_start( array_start, index )";
       code_ += "return bytes.{{DECODE_FUNC}}(element_start ) \\";
-      code_ += IsEnum( type ) ? "as {{GODOT_TYPE}}" : "";
+      code_ += IsEnum( type ) ? "as {{GODOT_ELEMENT}}" : "";
       code_.DecrementIdentLevel();
       code_ += "";
 
-      code_ += "func {{FIELD_NAME}}() -> FlatBufferArray:";
+      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
       code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-      code_ += "if not foffset: return null";
+      code_ += "if not foffset: return []";
       code_ += "var array_start = get_field_start( foffset )";
-      code_ += "return get_array( array_start, func(loc): bytes.{{DECODE_FUNC}}(loc) )";
+      code_ += "return decode_{{GODOT_TYPE}}( array_start )";
       code_.DecrementIdentLevel();
       code_ += "";
     }
@@ -656,7 +674,7 @@ class GdscriptGenerator : public BaseGenerator {
       code_.SetValue( "FIELD_NAME", Name( *field ) );
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
-        code_ += "# {{FIELD_NAME}} is deprecated\n";
+        code_ += "# field:'{{FIELD_NAME}}' is deprecated\n";
         continue;
       }
       if( field->IsRequired() ){
@@ -697,7 +715,7 @@ class GdscriptGenerator : public BaseGenerator {
       else if( IsString( type ) ){
         auto godot_type = GetGodotType(type);
         code_.SetValue( "GODOT_TYPE", godot_type );
-        code_.SetValue( "DECODE_FUNC", "decode_string" );
+        code_.SetValue( "DECODE_FUNC", "decode_String" );
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
         code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
@@ -814,29 +832,28 @@ class GdscriptGenerator : public BaseGenerator {
     code_.DecrementIdentLevel();
     code_ += "";
 
-
-    for (const auto &field: struct_def.fields.vec ) {
-      if (field->deprecated) continue;
+    for( const auto &field : struct_def.fields.vec ){
+      if( field->deprecated ) continue;
       const bool is_scalar = IsScalar(field->value.type.base_type);
-      //FIXME implement the added default argument overload functions for gdscript so the below can be unstubbed
-      const bool is_default_scalar = false; //STUB = is_scalar && !field->IsScalarOptional();
-
+      // FIXME implement the added default argument overload functions for gdscript so the below can be un-stubbed
+      const bool is_default_scalar = is_scalar && !field->IsScalarOptional();
 
       std::string offset = GenFieldOffsetName(*field);
       std::string name = Name(*field);
-      std::string value = is_default_scalar ? field->value.constant : "";
+      std::string default_ = is_default_scalar ? field->value.constant : "";
 
       // Generate accessor functions of the form:
       // void add_name(type name) {
       //   fbb_.AddElement<type>(offset, name, default);
       // }
       code_.SetValue("FIELD_NAME", Name(*field));
-      code_.SetValue("FIELD_TYPE", GetGodotType( field->value.type ) );
+      code_.SetValue("FIELD_TYPE", GetGodotType(field->value.type));
       code_.SetValue("ADD_OFFSET", Name(struct_def) + "." + offset);
       code_.SetValue("ADD_NAME", name);
-      code_.SetValue("ADD_VALUE", value);
+      code_.SetValue("ADD_DEFAULT", default_);
       if (is_scalar) {
-        code_.SetValue("ADD_FN", std::string("add_element_") + TypeName(field->value.type.base_type));
+        code_.SetValue("ADD_FN", std::string("add_element_") +
+                                     TypeName(field->value.type.base_type));
       } else {
         code_.SetValue("ADD_FN", "add_offset");
       }
@@ -857,7 +874,8 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "";
     }
 
-    // Finish() function.
+    // var finish(): -> void
+    // ---------------------
     code_ += "func finish() -> int:";
     code_.IncrementIdentLevel();
     code_ += "var end = fbb_.end_table( start_ )";
@@ -881,6 +899,7 @@ class GdscriptGenerator : public BaseGenerator {
   void GenCreateFunc( const StructDef &struct_def ){
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
+
     code_ += "static func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
@@ -888,21 +907,36 @@ class GdscriptGenerator : public BaseGenerator {
     bool add_sep = false;
     for (const auto &field : struct_def.fields.vec) {
       if( field->deprecated ) continue;
-      code_.SetValue("PARAM_NAME", Name(*field) + (field->IsScalar() ? "_" : "_offset") );
+      code_.SetValue("PARAM_NAME", Name(*field) );
       code_.SetValue("PARAM_VALUE", "default" );
       code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
       //FIXME add default value if possible.
       if( add_sep ) code_ += "{{SEP}}";
-      if( field->IsScalar() ) {
-        code_ += "{{PARAM_NAME}} : {{PARAM_TYPE}}\\";
-      } else{
-        code_ += "{{PARAM_NAME}} : int\\";
-      }
+      code_ += "{{PARAM_NAME}} : {{PARAM_TYPE}}\\";
       add_sep = true;
     }
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
+    code_ += "";
 
+    // All the non-inline objects need to be added to the builder before adding our object
+    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
+      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
+        const auto &field = **it;
+        if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
+          if( field.IsScalar() ) continue;
+          code_.SetValue("PARAM_NAME", Name(field) );
+          code_.SetValue("PARAM_TYPE", ToLower( GetGodotType( field.value.type ) ) );
+          if( IsStruct(field.value.type) || IsTable(field.value.type) ){
+            code_ += "# {{PARAM_NAME}} : {{PARAM_TYPE}}";
+            code_ += "# TODO var I haven't yet figured out how to create tables or structs here";
+            continue;
+          }
+          code_ += "var {{PARAM_NAME}}_offset : int = _fbb.create_{{PARAM_TYPE}}( {{PARAM_NAME}} );";
+        }
+      }
+    }
+    code_ += "";
     // Create* function body
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
@@ -910,7 +944,7 @@ class GdscriptGenerator : public BaseGenerator {
         const auto &field = **it;
         if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
           code_.SetValue("FIELD_NAME", Name(field));
-          code_.SetValue("PARAM_NAME", Name(field) + (field.IsScalar() ? "_" : "_offset") );
+          code_.SetValue("PARAM_NAME", Name(field) + (field.IsScalar() ? "" : "_offset") );
           code_ += "builder.add_{{FIELD_NAME}}( {{PARAM_NAME}} );";
         }
       }
@@ -933,11 +967,11 @@ static bool GenerateGDScript(const Parser &parser, const std::string &path,
 
 static std::string GDScriptMakeRule(const Parser &parser, const std::string &path,
                                const std::string &file_name) {
-  const auto filebase = StripPath(StripExtension(file_name));
+  const auto file_base = StripPath(StripExtension(file_name));
   gdscript::GdscriptGenerator generator(parser, path, file_name, parser.opts);
   const auto included_files = parser.GetIncludedFilesRecursive(file_name);
   std::string make_rule =
-      generator.GeneratedFileName(path, filebase, parser.opts) + ": ";
+      generator.GeneratedFileName(path, file_base, parser.opts) + ": ";
   for (const std::string &included_file : included_files) {
     make_rule += " " + included_file;
   }
