@@ -31,6 +31,41 @@ static inline std::string ToLower(std::string val) {
 }
 
 namespace gdscript {
+
+enum GodotArrayType{
+  GODOT_ARRAY_NONE,
+  GODOT_ARRAY_BOOL,
+  GODOT_ARRAY_BYTE,
+  GODOT_ARRAY_SCALAR,
+  GODOT_ARRAY_PACKED,
+  GODOT_ARRAY_STRING,
+  GODOT_ARRAY_STRUCT,
+  GODOT_ARRAY_TABLE,
+  GODOT_ARRAY_UNION,
+};
+
+const char *vector_create_func[] = {
+  "",               // 0 NONE
+  "create_Vector_uint8",      // 1 UTYPE
+  "",      // 2 BOOL
+  "create_Vector_int8",       // 3 CHAR
+  "create_Vector_uint8",      // 4 UCHAR
+  "create_Vector_int16",      // 5 SHORT
+  "create_Vector_uint16",     // 6 USHORT
+  "create_Vector_int32",      // 7 INT
+  "create_Vector_uint32",     // 8 UINT
+  "create_Vector_int64",      // 9 LONG
+  "create_Vector_uint64",     //10 ULONG
+  "create_Vector_float32",    //11 FLOAT
+  "create_Vector_float64",    //12 DOUBLE
+  "create_String",            //13 STRING
+  "",      //14 VECTOR
+  "",      //15 STRUCT
+  "",      //16 UNION
+  "",      //17 ARRAY
+  "",      //18 VECTOR64
+};
+
 const char *decode_funcs[] = {
 "",               // 0 NONE
 "decode_u8",      // 1 UTYPE
@@ -51,6 +86,28 @@ const char *decode_funcs[] = {
 "",               //16 UNION
 "",               //17 ARRAY
 "",               //18 VECTOR64
+};
+
+const char *element_size[] = {
+  "", // 0 NONE
+  "1", // 1 UTYPE
+  "1", // 2 BOOL
+  "1", // 3 CHAR
+  "1", // 4 UCHAR
+  "2", // 5 SHORT
+  "2", // 6 USHORT
+  "4", // 7 INT
+  "4", // 8 UINT
+  "8", // 9 LONG
+  "8", //10 ULONG
+  "4", //11 FLOAT
+  "8", //12 DOUBLE
+  "", //13 STRING
+  "", //14 VECTOR
+  "", //15 STRUCT
+  "", //16 UNION
+  "", //17 ARRAY
+  "", //18 VECTOR64
 };
 
 // Extension of IDLOptions for gdscript-generator.
@@ -240,12 +297,9 @@ class GdscriptGenerator : public BaseGenerator {
     else if( IsSeries( type ) ){
       if( IsScalar(type.element) ){
         switch( type.element ){
-          case BASE_TYPE_CHAR:
           case BASE_TYPE_UCHAR: return "PackedByteArray";
-          case BASE_TYPE_INT:
-          case BASE_TYPE_UINT: return "PackedInt32Array";
-          case BASE_TYPE_LONG:
-          case BASE_TYPE_ULONG: return "PackedInt64Array";
+          case BASE_TYPE_INT: return "PackedInt32Array";
+          case BASE_TYPE_LONG: return "PackedInt64Array";
           case BASE_TYPE_FLOAT: return "PackedFloat32Array";
           case BASE_TYPE_DOUBLE: return "PackedFloat64Array";
           case BASE_TYPE_STRING: return "PackedStringArray";
@@ -259,33 +313,6 @@ class GdscriptGenerator : public BaseGenerator {
     }
     else{
       return "TODO";
-    }
-  }
-
-  static bool HasNativeArray( const Type &type ){
-    switch( type.base_type ){
-      case BASE_TYPE_UCHAR:
-      case BASE_TYPE_INT:
-      case BASE_TYPE_LONG:
-      case BASE_TYPE_FLOAT:
-      case BASE_TYPE_DOUBLE:
-        return true;
-      case BASE_TYPE_NONE:
-      case BASE_TYPE_UTYPE:
-      case BASE_TYPE_BOOL:
-      case BASE_TYPE_CHAR:
-      case BASE_TYPE_SHORT:
-      case BASE_TYPE_USHORT:
-      case BASE_TYPE_UINT:
-      case BASE_TYPE_ULONG:
-      case BASE_TYPE_STRING:
-      case BASE_TYPE_VECTOR:
-      case BASE_TYPE_VECTOR64:
-      case BASE_TYPE_STRUCT:
-      case BASE_TYPE_UNION:
-      case BASE_TYPE_ARRAY:
-      default:
-        return false;
     }
   }
 
@@ -356,8 +383,12 @@ class GdscriptGenerator : public BaseGenerator {
 //                            // or for an integral type derived from an enum.
     code_ += "#  enum_def: \\";
     code_ += type.enum_def ? "exists" : "<null>";
+
 //    uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
     code_ += "#  fixed_length: " + NumToString(type.fixed_length);
+    if( type.base_type == BASE_TYPE_ARRAY ){
+      code_ += "#  fixed_length is only set when base_type == BASE_TYPE_ARRAY";
+    }
 
     code_ += "#  IsStruct() = \\";
     code_ += IsStruct(type) ? "true" : "false";
@@ -499,21 +530,152 @@ class GdscriptGenerator : public BaseGenerator {
   }
 
   void GenSeriesAccessors( const FieldDef &field ){
-    // Convenience Function to get the size of the array
-    code_ += "# Accessors for {{FIELD_NAME}}";
-    code_ += "func {{FIELD_NAME}}_count() -> int:";
-    code_.IncrementIdentLevel();
-    code_ += "return get_array_count( {{OFFSET_NAME}} )";
-    code_.DecrementIdentLevel();
-    code_ += "";
-
-
+    // to get here we have checked the field.value.type.basetype == VECTOR || VECTOR64 || ARRAY
+    /*
+     * What kind of arrays do I have.
+     * scalar arrays
+     * strings
+     * struct arrays
+     * table arrays
+     * union arrays
+     * dictionaries
+     */
     const auto type = field.value.type;
     const auto element = type.VectorType();
 
-    code_.SetValue( "GODOT_TYPE", GetGodotType( type ) );
-    code_.SetValue( "GODOT_ELEMENT", GetGodotType( element ) );
-    code_.SetValue("DECODE_FUNC", decode_funcs[ element.base_type ] );
+    std::string to_packed_func;
+    GodotArrayType array_type = GODOT_ARRAY_NONE;
+
+    switch( type.element ){
+      case BASE_TYPE_BOOL: array_type = GODOT_ARRAY_BOOL; break; // I believe this is a special case?
+
+      case BASE_TYPE_UCHAR: array_type = GODOT_ARRAY_BYTE; break; // Easiest case, we just need to slice.
+
+        // These are relatively easy and have direct corresponding packed arrays in godot.
+      case BASE_TYPE_INT:
+        array_type = GODOT_ARRAY_PACKED;
+        to_packed_func = "to_int32_array()"; break;
+      case BASE_TYPE_LONG:
+        array_type = GODOT_ARRAY_PACKED;
+        to_packed_func = "to_int64_array()"; break;
+      case BASE_TYPE_FLOAT:
+        array_type = GODOT_ARRAY_PACKED;
+        to_packed_func = "to_float32_array()"; break;
+      case BASE_TYPE_DOUBLE:
+        array_type = GODOT_ARRAY_PACKED;
+        to_packed_func = "to_float64_array()"; break;
+
+        // I'm going to have to do some decoding from packed byte array
+      case BASE_TYPE_CHAR:
+      case BASE_TYPE_SHORT:
+      case BASE_TYPE_USHORT:
+      case BASE_TYPE_UINT:
+      case BASE_TYPE_ULONG:
+        array_type = GODOT_ARRAY_SCALAR;
+        break;
+
+        // These three I believe are relatively easy too,
+        // I just need to hand off to other functions once I get the offsets.
+      case BASE_TYPE_STRING: array_type = GODOT_ARRAY_STRING; break;
+      case BASE_TYPE_STRUCT: array_type = GODOT_ARRAY_STRUCT; break;
+      case BASE_TYPE_UNION: array_type = GODOT_ARRAY_TABLE; break;
+
+        // I don't know how to handle these right now.
+      case BASE_TYPE_NONE:  // something would be broken
+      case BASE_TYPE_UTYPE: // a vector of union types?
+      case BASE_TYPE_ARRAY:  // a vector of arrays?
+      case BASE_TYPE_VECTOR:  // a vector of vectors?
+      case BASE_TYPE_VECTOR64: break; // again...
+        // I mean it all makes sense that these would be allowed as they are just offsets to data.
+        // It's just very recursive.
+    }
+
+    code_.SetValue( "ARRAY_TYPE", GetGodotType( type ) );
+    code_.SetValue( "ELEMENT_TYPE", GetGodotType( element ) );
+    code_.SetValue( "ELEMENT_SIZE", element_size[type.element] );
+
+    code_.SetValue("DECODE_FUNC", decode_funcs[ type.element] );
+    code_.SetValue("TO_PACKED_FUNC", to_packed_func );
+
+    // Convenience Function to get the size of the array
+    code_ += "# Accessors for {{FIELD_NAME}}";
+    code_ += "func {{FIELD_NAME}}_size() -> int:";
+    code_.IncrementIdentLevel();
+    code_ += "return get_array_size( {{OFFSET_NAME}} )";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    if( array_type == GODOT_ARRAY_BYTE ) {
+      code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return 0";
+      code_ += "array_start += 4";
+      code_ += "return bytes[array_start + index]";
+      code_.DecrementIdentLevel();
+      code_ += "";
+
+      code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return []";
+      code_ += "var array_size = bytes.decode_u32( array_start )";
+      code_ += "array_start += 4";
+      code_ += "return bytes.slice( array_start, array_start + array_size )";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    } else if( array_type == GODOT_ARRAY_SCALAR ){
+      code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return 0";
+      code_ += "array_start += 4";
+      code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
+      code_.DecrementIdentLevel();
+      code_ += "";
+
+      code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return []";
+      code_ += "var array_size = bytes.decode_u32( array_start )";
+      code_ += "array_start += 4";
+
+      code_ += "var array = []";
+      code_ += "array.resize( array_size )";
+      code_ += "for i in array_size:";
+      code_.IncrementIdentLevel();
+      code_ += "array[i] = bytes.{{DECODE_FUNC}}( array_start + i * {{ELEMENT_SIZE}})";
+      code_.DecrementIdentLevel();
+      code_ += "return array";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    } else if( array_type == GODOT_ARRAY_PACKED ){
+      code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return 0";
+      code_ += "array_start += 4";
+      code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
+      code_.DecrementIdentLevel();
+      code_ += "";
+
+      code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return []";
+      code_ += "var array_size = bytes.decode_u32( array_start )";
+      code_ += "array_start += 4";
+      code_ += "var array_end = array_start + array_size * {{ELEMENT_SIZE}}";
+      code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    } else {
+      code_ += "# TODO Unhandled array element type.";
+      code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}: return []";
+      GenFieldDebug( field );
+    }
+    return;
     if( IsScalar(type.element ) ){
       code_ +="func {{FIELD_NAME}}_at( index : int ) -> {{GODOT_ELEMENT}}:";
       code_.IncrementIdentLevel();
@@ -577,43 +739,6 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "return get_array( array_start, {{FILE_NAME}}.Get{{STRUCT_NAME}} )";
       code_.DecrementIdentLevel();
       code_ += "";
-    }
-    else {
-      code_ += "# TODO Unhandled array element type.";
-      GenFieldDebug( field );
-    }
-
-    if( HasNativeArray( type ) ){
-      if( type.base_type == BASE_TYPE_UCHAR ) {
-        code_.SetValue("ARRAY_TYPE", "PackedByteArray");
-        code_.SetValue("ARRAY_CONV", "");
-      }
-      else if( type.base_type == BASE_TYPE_INT ) {
-        code_.SetValue("ARRAY_TYPE", "PackedInt32Array");
-        code_.SetValue("ARRAY_CONV", ".to_int32_array()");
-      }
-      else if( type.base_type == BASE_TYPE_LONG) {
-        code_.SetValue("ARRAY_TYPE", "PackedInt64Array");
-        code_.SetValue("ARRAY_CONV", ".to_int64_array()");
-      }
-      else if( type.base_type == BASE_TYPE_FLOAT) {
-        code_.SetValue("ARRAY_TYPE", "PackedFloat32Array");
-        code_.SetValue("ARRAY_CONV", ".to_float32_array()");
-      }
-      else if( type.base_type == BASE_TYPE_DOUBLE) {
-        code_.SetValue("ARRAY_TYPE", "PackedFloat64Array");
-        code_.SetValue("ARRAY_CONV", ".to_float64_array()");
-      }
-      {
-        code_ += "func {{FIELD_NAME}}_native() -> {{ARRAY_TYPE}}:";
-        code_.IncrementIdentLevel();
-        code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-        code_ += "if not foffset: return []";
-        code_ += "var array_start = get_field_start( foffset )";
-        code_ += "return bytes.slice( array_start + 4, bytes.decode_u32( array_start ) ){{ARRAY_CONV}}";
-        code_.DecrementIdentLevel();
-        code_ += "";
-      }
     }
   }
 
@@ -772,7 +897,7 @@ class GdscriptGenerator : public BaseGenerator {
         code_ += "return null";
         code_.DecrementIdentLevel();
       }
-      else if(IsSeries( type) ){
+      else if(IsSeries( type ) ){
         GenSeriesAccessors(*field);
       }
       else {
@@ -932,13 +1057,19 @@ class GdscriptGenerator : public BaseGenerator {
         if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
           if( field.IsScalar() ) continue;
           code_.SetValue("PARAM_NAME", Name(field) );
-          code_.SetValue("PARAM_TYPE", ToLower( GetGodotType( field.value.type ) ) );
+          code_.SetValue("PARAM_TYPE", GetGodotType( field.value.type ) );
           if( IsStruct(field.value.type) || IsTable(field.value.type) ){
             code_ += "# {{PARAM_NAME}} : {{PARAM_TYPE}}";
             code_ += "# TODO var I haven't yet figured out how to create tables or structs here";
             continue;
           }
-          code_ += "var {{PARAM_NAME}}_offset : int = _fbb.create_{{PARAM_TYPE}}( {{PARAM_NAME}} );";
+          if( IsSeries(field.value.type) ){
+            code_.SetValue("CREATE_FUNC", vector_create_func[field.value.type.element] );
+          }
+          if( IsString(field.value.type) ){
+            code_.SetValue("CREATE_FUNC", vector_create_func[field.value.type.base_type] );
+          }
+          code_ += "var {{PARAM_NAME}}_offset : int = _fbb.{{CREATE_FUNC}}( {{PARAM_NAME}} );";
         }
       }
     }
