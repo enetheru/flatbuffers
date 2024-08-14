@@ -58,7 +58,7 @@ const char *vector_create_func[] = {
   "create_Vector_uint64",     //10 ULONG
   "create_Vector_float32",    //11 FLOAT
   "create_Vector_float64",    //12 DOUBLE
-  "create_String",            //13 STRING
+  "create_PackedStringArray",            //13 STRING
   "",      //14 VECTOR
   "",      //15 STRUCT
   "",      //16 UNION
@@ -102,8 +102,8 @@ const char *element_size[] = {
   "8", //10 ULONG
   "4", //11 FLOAT
   "8", //12 DOUBLE
-  "", //13 STRING
-  "", //14 VECTOR
+  "4", //13 STRING - a list of offsets to the strings
+  "4", //14 VECTOR - a list of offsets to the tables
   "", //15 STRUCT
   "", //16 UNION
   "", //17 ARRAY
@@ -302,9 +302,10 @@ class GdscriptGenerator : public BaseGenerator {
           case BASE_TYPE_LONG: return "PackedInt64Array";
           case BASE_TYPE_FLOAT: return "PackedFloat32Array";
           case BASE_TYPE_DOUBLE: return "PackedFloat64Array";
-          case BASE_TYPE_STRING: return "PackedStringArray";
           default:break;
         }
+      } else if( IsString( type.VectorType() ) ){
+        return "PackedStringArray";
       }
       return "Array";
     }
@@ -576,7 +577,9 @@ class GdscriptGenerator : public BaseGenerator {
 
         // These three I believe are relatively easy too,
         // I just need to hand off to other functions once I get the offsets.
-      case BASE_TYPE_STRING: array_type = GODOT_ARRAY_STRING; break;
+      case BASE_TYPE_STRING:
+        array_type = GODOT_ARRAY_STRING;
+        break;
       case BASE_TYPE_STRUCT: array_type = GODOT_ARRAY_STRUCT; break;
       case BASE_TYPE_UNION: array_type = GODOT_ARRAY_TABLE; break;
 
@@ -668,6 +671,35 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += "array_start += 4";
       code_ += "var array_end = array_start + array_size * {{ELEMENT_SIZE}}";
       code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    } else if( array_type == GODOT_ARRAY_STRING ){
+      code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return \"\"";
+      code_ += "array_start += 4";
+      code_ += "var string_start = array_start + index * {{ELEMENT_SIZE}}";
+      code_ += "string_start += bytes.decode_u32( string_start )";
+      code_ += "return {{DECODE_FUNC}}( string_start )";
+      code_.DecrementIdentLevel();
+      code_ += "";
+
+      code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not array_start: return []";
+      code_ += "var array_size = bytes.decode_u32( array_start )";
+      code_ += "array_start += 4";
+      code_ += "var array : {{ARRAY_TYPE}}";
+      code_ += "array.resize( array_size )";
+      code_ += "for i in array_size:";
+      code_.IncrementIdentLevel();
+      code_ += "var idx = array_start + i * {{ELEMENT_SIZE}}";
+      code_ += "var element_start = idx + bytes.decode_u32( idx )";
+      code_ += "array[i] = {{DECODE_FUNC}}( element_start )";
+      code_.DecrementIdentLevel();
+      code_ += "return array";
       code_.DecrementIdentLevel();
       code_ += "";
     } else {
@@ -1067,7 +1099,7 @@ class GdscriptGenerator : public BaseGenerator {
             code_.SetValue("CREATE_FUNC", vector_create_func[field.value.type.element] );
           }
           if( IsString(field.value.type) ){
-            code_.SetValue("CREATE_FUNC", vector_create_func[field.value.type.base_type] );
+            code_.SetValue("CREATE_FUNC", "create_String" );
           }
           code_ += "var {{PARAM_NAME}}_offset : int = _fbb.{{CREATE_FUNC}}( {{PARAM_NAME}} );";
         }
