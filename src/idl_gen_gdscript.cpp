@@ -128,12 +128,13 @@ class GdscriptGenerator : public BaseGenerator {
   {
     code_.SetPadding("\t");
 
-    static const char *const variant_types[] = {
+    static const char *const builtin_types_[] = {
       "Vector3",
+      "Vector3i",
       "Color",
       nullptr
     };
-    for (auto kw = variant_types; *kw; kw++) variant_types_.insert(*kw);
+    for (auto kw = builtin_types_; *kw; kw++) builtin_types.insert(*kw);
 
     static const char *const keywords[] = {
       "if",
@@ -228,7 +229,7 @@ class GdscriptGenerator : public BaseGenerator {
   CodeWriter code_;
 
   std::unordered_set<std::string> keywords_;
-  std::unordered_set<std::string> variant_types_;
+  std::unordered_set<std::string> builtin_types;
 
   const IDLOptionsGdscript opts_;
 
@@ -236,9 +237,9 @@ class GdscriptGenerator : public BaseGenerator {
     return keywords_.find(name) == keywords_.end() ? name : name + "_";
   }
 
-  bool IsVariant( const Type &type ){
+  bool IsBuiltin( const Type &type ){
     if( type.struct_def ) {
-      return variant_types_.find(type.struct_def->name) != variant_types_.end();
+      return builtin_types.find(type.struct_def->name) != builtin_types.end();
     }
     return false;
   }
@@ -589,10 +590,10 @@ class GdscriptGenerator : public BaseGenerator {
 
   void GenAccessFunc(const FieldDef &field) {
         const auto &type = field.value.type;
+        code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
+        code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
 
         if( field.IsScalar() ){
-          code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
-          code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
           code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
@@ -603,9 +604,6 @@ class GdscriptGenerator : public BaseGenerator {
           code_.DecrementIdentLevel();
         }
         else if( IsString( type ) ){
-          auto godot_type = GetGodotType(type);
-          code_.SetValue( "GODOT_TYPE", godot_type );
-          code_.SetValue( "DECODE_FUNC", "decode_String" );
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
           code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
@@ -614,27 +612,20 @@ class GdscriptGenerator : public BaseGenerator {
           code_ += "return {{DECODE_FUNC}}( field_start )";
           code_.DecrementIdentLevel();
         }
-        else if( IsVariant( type ) ){
-          auto godot_type = GetGodotType(type);
-          code_.SetValue( "GODOT_TYPE", godot_type );
-          code_.SetValue( "DECODE_FUNC", "decode_" + ToLower(godot_type) );
+        else if( IsStruct( type ) ){
+          if(IsBuiltin(type)){
+            code_.SetValue( "DECODE_FUNC", "decode_" + GetGodotType(type));
+          }
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return {{GODOT_TYPE}}()";
-          code_ += "var field_start = get_field_start( foffset )";
-          code_ += "return {{DECODE_FUNC}}( field_start )";
+          code_ += "var field_offset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "if not field_offset: return {{GODOT_TYPE}}()";
+          code_ += "return {{DECODE_FUNC}}( start + field_offset )";
           code_.DecrementIdentLevel();
         }
-        else if( IsStruct( type ) || IsTable( type ) ){
-          code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
-          code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
-          code_ += "if not foffset: return null";
-          code_ += "var field_start = get_field_start( foffset )";
-          code_ += "return {{FILE_NAME}}.Get{{GODOT_TYPE}}( field_start, bytes )";
-          code_.DecrementIdentLevel();
+        else if(  IsTable( type ) ) {
+          code_ += " #TODO - Handle table";
+          GenFieldDebug( field );
         }
         else if( IsUnion(type) ){
           code_ += "func {{FIELD_NAME}}():";
@@ -703,11 +694,11 @@ class GdscriptGenerator : public BaseGenerator {
     // Generate classes to access the table fields
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
-    
+
     GenComment(struct_def.doc_comment );
 
     // GDScript likes to have empty constructors and cant do overloading.
-    // So generate the static factory func in place of a constructor.\
+    // So generate the static factory func in place of a constructor.
     // assumes that TABLE_NAME was set previously
     code_.SetValue("TABLE_NAME", Name(struct_def ) );
     GenStaticFactory();
