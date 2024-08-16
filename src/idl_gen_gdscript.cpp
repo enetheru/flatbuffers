@@ -550,7 +550,7 @@ class GdscriptGenerator : public BaseGenerator {
       // We need to add a trailing comma to all elements except the last one as
       // older versions of gcc complain about this.
       code_.SetValue("SEP", "");
-      code_ += "enum {";
+      code_ += "enum vtable{";
       code_.IncrementIdentLevel();
       bool sep = false;
       code_.SetValue("SEP", ",");
@@ -583,7 +583,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue("OFFSET_NAME", GenFieldOffsetName(field));
     code_ += "func {{FIELD_NAME}}_is_present() -> bool:";
     code_.IncrementIdentLevel();
-    code_ += "return get_field_offset( {{OFFSET_NAME}} )";
+    code_ += "return get_field_offset( vtable.{{OFFSET_NAME}} )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -596,7 +596,7 @@ class GdscriptGenerator : public BaseGenerator {
         if( field.IsScalar() ){
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "var foffset = get_field_offset( vtable.{{OFFSET_NAME}} )";
           code_ += "if not foffset: return " + field.value.constant + "\\";
           code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
           code_ += "return bytes.{{DECODE_FUNC}}( start + foffset )\\";
@@ -606,7 +606,7 @@ class GdscriptGenerator : public BaseGenerator {
         else if( IsString( type ) ){
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "var foffset = get_field_offset( vtable.{{OFFSET_NAME}} )";
           code_ += "if not foffset: return {{GODOT_TYPE}}()";
           code_ += "var field_start = get_field_start( foffset )";
           code_ += "return {{DECODE_FUNC}}( field_start )";
@@ -618,7 +618,7 @@ class GdscriptGenerator : public BaseGenerator {
           }
           code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
           code_.IncrementIdentLevel();
-          code_ += "var field_offset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
           code_ += "if not field_offset: return {{GODOT_TYPE}}()";
           code_ += "return {{DECODE_FUNC}}( start + field_offset )";
           code_.DecrementIdentLevel();
@@ -630,7 +630,7 @@ class GdscriptGenerator : public BaseGenerator {
         else if( IsUnion(type) ){
           code_ += "func {{FIELD_NAME}}():";
           code_.IncrementIdentLevel();
-          code_ += "var foffset = get_field_offset( {{OFFSET_NAME}} )";
+          code_ += "var foffset = get_field_offset( vtable.{{OFFSET_NAME}} )";
           code_ += "if not foffset: return null";
           code_ += "var field_start = get_field_start( foffset )";
 
@@ -663,12 +663,23 @@ class GdscriptGenerator : public BaseGenerator {
         code_ += "";
   }
 
-  void GenPrettyPrinter( const StructDef &struct_def ){
+  void GenDebugDict( const StructDef &struct_def ){
     // Generate Pretty Printer
-    code_ += "func pprint( printer : FlatBufferPrinter, heading = \"\"):";
+    code_ += "func debug():";
     code_.IncrementIdentLevel();
-    code_ += "printer.print(\"{{TABLE_NAME}} {\", heading)";
-    code_ += "printer.indent()";
+    code_ += "var d : Dictionary = {} ";
+    code_ += "d['start'] = start ";
+    code_ += "d['vtable_offset'] = bytes.decode_s32( start ) ";
+    code_ += "d['vtable_start'] = d.start - d.vtable_offset ";
+    code_ += "d['vtable_bytes'] = bytes.decode_u16( d.vtable_start ) ";
+    code_ += "d['table_size'] = bytes.decode_u16( d.vtable_start + 2 ) ";
+    code_ += "d['vtable_size'] = (d.vtable_bytes / 2) - 2 ";
+    code_ += "d['vtable'] = Dictionary() ";
+    code_ += "for i in d.vtable_size: ";
+    code_ += "\td.vtable[voffsets.keys()[i]] = bytes.decode_u16( d.vtable_start + voffsets.values()[i] ) ";
+
+
+
     for (const auto &field : struct_def.fields.vec) {
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
@@ -680,11 +691,13 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += field->IsRequired() ? "(required)" : "";
       code_ += "if {{FIELD_NAME}}_is_present():";
       code_.IncrementIdentLevel();
-      code_ += "printer.print( self.{{FIELD_NAME}}(), \"{{FIELD_NAME}}\" )";
+      code_ += "var {{FIELD_NAME}} = self.{{FIELD_NAME}}() ";
+      code_ += "if {{FIELD_NAME}} is FlatBuffer: ";
+      code_ += "\td['{{FIELD_NAME}}'] = {{FIELD_NAME}}.debug() ";
+      code_ += "else: d['{{FIELD_NAME}}'] = {{FIELD_NAME}}() ";
       code_.DecrementIdentLevel();
     }
-    code_ += "printer.outdent()";
-    code_ += "printer.print(\"}\")";
+    code_ += "return d ";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -724,7 +737,7 @@ class GdscriptGenerator : public BaseGenerator {
         GenAccessFunc(*field);
       }
 
-      GenPrettyPrinter(struct_def);
+      GenDebugDict(struct_def);
 
       code_.DecrementIdentLevel();
       code_ += "";
@@ -809,14 +822,14 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "# Accessors for {{FIELD_NAME}}";
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "return get_array_size( {{OFFSET_NAME}} )";
+    code_ += "return get_array_size( vtable.{{OFFSET_NAME}} )";
     code_.DecrementIdentLevel();
     code_ += "";
 
     if( array_type == GODOT_ARRAY_BYTE ) {
       code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return 0";
       code_ += "array_start += 4";
       code_ += "return bytes[array_start + index]";
@@ -825,7 +838,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return []";
       code_ += "var array_size = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
@@ -835,7 +848,7 @@ class GdscriptGenerator : public BaseGenerator {
     } else if( array_type == GODOT_ARRAY_SCALAR ){
       code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return 0";
       code_ += "array_start += 4";
       code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
@@ -844,7 +857,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return []";
       code_ += "var array_size = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
@@ -861,7 +874,7 @@ class GdscriptGenerator : public BaseGenerator {
     } else if( array_type == GODOT_ARRAY_PACKED ){
       code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return 0";
       code_ += "array_start += 4";
       code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
@@ -870,7 +883,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return []";
       code_ += "var array_size = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
@@ -881,7 +894,7 @@ class GdscriptGenerator : public BaseGenerator {
     } else if( array_type == GODOT_ARRAY_STRING ){
       code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return \"\"";
       code_ += "array_start += 4";
       code_ += "var string_start = array_start + index * {{ELEMENT_SIZE}}";
@@ -892,7 +905,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_ += "func {{FIELD_NAME}}() -> {{ARRAY_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "var array_start = get_field_start( {{OFFSET_NAME}} )";
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
       code_ += "if not array_start: return []";
       code_ += "var array_size = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
@@ -959,7 +972,7 @@ class GdscriptGenerator : public BaseGenerator {
 
       code_.SetValue("VALUE_DEFAULT", default_ );
       if( IsEnum(field->value.type) ){
-        code_.SetValue("TYPE_NAME", "ubyte" ); // enums are interpreted as a ubyte
+        code_.SetValue("TYPE_NAME", "ubyte" ); // enums are interpreted as ubyte
       } else if( IsStruct(field->value.type) ) {
         code_.SetValue("TYPE_NAME", field->value.type.struct_def->name );
       } else {
@@ -997,7 +1010,7 @@ class GdscriptGenerator : public BaseGenerator {
       if (!field->deprecated && field->IsRequired()) {
         code_.SetValue("FIELD_NAME", Name(*field));
         code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
-        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.{{OFFSET_NAME}});";
+        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.vtable.{{OFFSET_NAME}});";
       }
     }
     code_ += "return o;";
