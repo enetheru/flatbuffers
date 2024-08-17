@@ -186,8 +186,9 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue( "FILE_NAME", file_name_ );
     keywords_.insert( file_name_ );
 
-    code_ += "class_name {{FILE_NAME}}";
-    code_ += "";
+    // I no longer wish to have the class name specified as it pollutes the global namespace
+//    code_ += "class_name {{FILE_NAME}}";
+//    code_ += "";
 
     // convenience function to get the root table without having to pass its position
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
@@ -664,38 +665,88 @@ class GdscriptGenerator : public BaseGenerator {
   }
 
   void GenDebugDict( const StructDef &struct_def ){
+    // There are only two options on how we got here
+    // Either we are a table, or we are a struct.
     // Generate Pretty Printer
     code_ += "func debug():";
     code_.IncrementIdentLevel();
     code_ += "var d : Dictionary = {} ";
     code_ += "d['start'] = start ";
-    code_ += "d['vtable_offset'] = bytes.decode_s32( start ) ";
-    code_ += "d['vtable_start'] = d.start - d.vtable_offset ";
-    code_ += "d['vtable_bytes'] = bytes.decode_u16( d.vtable_start ) ";
-    code_ += "d['table_size'] = bytes.decode_u16( d.vtable_start + 2 ) ";
-    code_ += "d['vtable_size'] = (d.vtable_bytes / 2) - 2 ";
-    code_ += "d['vtable'] = Dictionary() ";
-    code_ += "for i in d.vtable_size: ";
-    code_ += "\td.vtable[voffsets.keys()[i]] = bytes.decode_u16( d.vtable_start + voffsets.values()[i] ) ";
 
-
+    // IF we are a table, then we have a vtable.
+    if( struct_def.fixed ) {}// Then we are a struct
+    else {
+      code_ += "d['vtable_offset'] = bytes.decode_s32( start ) ";
+      code_ += "d['vtable_start'] = d.start - d.vtable_offset ";
+      code_ += "d['vtable'] = Dictionary() ";
+      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start ) ";
+      code_ +=
+          "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 ) ";
+      code_ += "for i in ((d.vtable_bytes / 2) - 2): ";
+      code_ += "\tvar keys = vtable.keys()";
+      code_ += "\tvar offsets = vtable.values()";
+      code_ +=
+          "\td.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] ) ";
+    }
 
     for (const auto &field : struct_def.fields.vec) {
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         continue;
       }
+      Type field_type = field->value.type;
+      Type element_type;
       code_.SetValue( "FIELD_NAME", Name( *field ) );
-      code_.SetValue( "FIELD_TYPE", GetGodotType( field->value.type ) );
+      code_.SetValue( "FIELD_TYPE", TypeName(field_type.base_type ) );
+      if( IsSeries(field_type ) ){
+        element_type = field_type.VectorType();
+        code_.SetValue( "ELEMENT_TYPE", TypeName( field_type.element ) );
+      }
+
+      code_.SetValue("OFFSET_NAME", GenFieldOffsetName( *field ) );
+
       code_ += "# {{FIELD_NAME}}:{{FIELD_TYPE}} \\";
       code_ += field->IsRequired() ? "(required)" : "";
-      code_ += "if {{FIELD_NAME}}_is_present():";
-      code_.IncrementIdentLevel();
-      code_ += "var {{FIELD_NAME}} = self.{{FIELD_NAME}}() ";
-      code_ += "if {{FIELD_NAME}} is FlatBuffer: ";
-      code_ += "\td['{{FIELD_NAME}}'] = {{FIELD_NAME}}.debug() ";
-      code_ += "else: d['{{FIELD_NAME}}'] = {{FIELD_NAME}}() ";
-      code_.DecrementIdentLevel();
+
+      // Field Types:
+      // TODO * Scalar
+      // TODO * Struct
+      // TODO * Table
+      // TODO * Union
+      // TODO * Vector of
+      // TODO     - Scalar
+      // TODO     - Struct
+      // TODO     - Table
+      // TODO * Vector of Union
+      // TODO * Fixed length Array
+
+      code_ += "var f = {'type':'{{FIELD_TYPE}}'}";
+
+      if( struct_def.fixed ) {  // we are a struct, and the fields are guaranteed to exist, and be scalars
+      } else { // we are a table
+        code_ += "if {{FIELD_NAME}}_is_present():";
+        code_.IncrementIdentLevel();
+        code_ += "f['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
+        if( IsScalar( field_type.base_type ) ){
+          code_ += "f['value'] = {{FIELD_NAME}}()";
+        } else if( IsVector( field_type) ) {
+          code_ += "f['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
+          code_ += "f['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
+          code_ +=
+              "f['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
+          if (IsScalar(field_type.element)) {
+          } else if (IsStruct(element_type)) {
+          } else if (IsTable(element_type)) {
+            code_ += "f['value'] = {{FIELD_NAME}}().map( func( element ): return element.debug() )";
+          }
+        }
+        code_.DecrementIdentLevel();
+      }
+      code_ += "d['{{FIELD_NAME}}'] = f";
+      /*
+       * # table_array: vector of table
+        d.table_array['data'] = table_array().map( func( item ): return item.debug() )
+       */
     }
     code_ += "return d ";
     code_.DecrementIdentLevel();
@@ -966,7 +1017,7 @@ class GdscriptGenerator : public BaseGenerator {
       //   fbb_.add_offset( {{FIELD_OFFSET}, {{FIELD_NAME}}}
 
       code_.SetValue("FIELD_NAME", field_name );
-      code_.SetValue("FIELD_OFFSET", struct_name + "." + offset);
+      code_.SetValue("FIELD_OFFSET", offset);
       code_.SetValue("GODOT_TYPE", GetGodotType(field->value.type));
 
 
@@ -989,11 +1040,11 @@ class GdscriptGenerator : public BaseGenerator {
       // Function Body
       if( field->IsScalar() ){
         code_ +=
-            "fbb_.add_element_{{TYPE_NAME}}_default( {{FIELD_OFFSET}}, {{FIELD_NAME}}, {{VALUE_DEFAULT}} )";
+            "fbb_.add_element_{{TYPE_NAME}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{FIELD_NAME}}, {{VALUE_DEFAULT}} )";
       } else if( IsStruct(field->value.type ) ) {
-        code_ += "fbb_.add_{{TYPE_NAME}}( {{FIELD_OFFSET}}, {{FIELD_NAME}} )";
+        code_ += "fbb_.add_{{TYPE_NAME}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{FIELD_NAME}} )";
       } else {
-        code_ += "fbb_.add_offset( {{FIELD_OFFSET}}, {{FIELD_NAME}}_offset )";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{FIELD_NAME}}_offset )";
       }
       code_.DecrementIdentLevel();
       code_ += "";
