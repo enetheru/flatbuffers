@@ -325,10 +325,52 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += text + "\\";
   }
 
+  void GenDefinitionDebug( const Definition *def ){
+    code_ += "# Definition Base Class";
+
+// std::string name;
+    code_ += "#  name = " + def->name;
+
+// std::string file;
+    code_ += "#  file = " + def->file;
+
+// std::vector<std::string> doc_comment;
+    code_ += "#  doc_comment = ?";// + def->doc_comment;
+
+// SymbolTable<Value> attributes;
+    code_ += "#  attributes = ??";// + def->attributes;
+
+// bool generated;  // did we already output code for this definition?
+    code_ += "#  generated = \\";
+    code_ += def->generated ? "true" : "false";
+
+// Namespace *defined_namespace;  // Where it was defined.
+    code_ += "#  defined_namespace = ";// + def->defined_namespace;
+
+// // For use with Serialize()
+// uoffset_t serialized_location;
+    code_ += "#  serialized_location = " + NumToString(def->serialized_location);
+
+// int index;  // Inside the vector it is stored.
+    code_ += "#  index = " + NumToString(def->index);
+
+// int refcount;
+    code_ += "#  refcount = " + NumToString( def->refcount );
+
+// const std::string *declaration_file;
+    code_ += "#  declaration_file = " + def->name;
+
+    code_ += "#  ---- ";
+  }
+
+
   void GenFieldDebug( const FieldDef &field){
     code_.SetValue("FIELD_NAME", Name(field));
     code_ += "# GenFieldDebug for: '{{FIELD_NAME}}'";
     code_ += "#FieldDef {";
+
+    //FieldDef is derived from Definition
+    GenDefinitionDebug( &field );
 
 //  bool deprecated;// Field is allowed to be present in old data, but can't be.
 //                  // written in new data nor accessed in new code.
@@ -422,10 +464,54 @@ class GdscriptGenerator : public BaseGenerator {
 
     code_ += "#}";
 
+    if( IsTable(type) && field.value.type.struct_def ) {
+      StructDef *struct_def = type.struct_def;
+
+      code_ += "#FieldDef.Value.Type.StructDef {";
+
+      //StructDef is derived from Definition
+      GenDefinitionDebug( struct_def );
+
+      // SymbolTable<FieldDef> fields;
+      code_ += "#  fields = ? (SymbolTable<FieldDef>)";
+
+      // bool fixed;       // If it's struct, not a table.
+      code_ += "#  fixed = \\";
+      code_ += struct_def->fixed ? "true" : "false";
+
+      // bool predecl;     // If it's used before it was defined.
+      code_ += "#  predecl = \\";
+      code_ += struct_def->predecl ? "true" : "false";
+
+      // bool sortbysize;  // Whether fields come in the declaration or size order.
+      code_ += "#  sortbysize = \\";
+      code_ += struct_def->sortbysize ? "true" : "false";
+
+      // bool has_key;     // It has a key field.
+      code_ += "#  has_key = \\";
+      code_ += struct_def->has_key ? "true" : "false";
+
+      // size_t minalign;  // What the whole object needs to be aligned to.
+      code_ += "#  minalign = " + NumToString(struct_def->minalign );
+
+      // size_t bytesize;  // Size if fixed.
+      code_ += "#  bytesize = " + NumToString(struct_def->bytesize );
+
+      // flatbuffers::unique_ptr<std::string> original_location;
+      code_ += "#  original_location = \\";
+      code_ += struct_def->original_location.get() ? *struct_def->original_location : "";
+
+      // std::vector<voffset_t> reserved_ids;
+      code_ += "#  reserved_ids = ? (std::vector<voffset_t>)";
+    }
 
     if( IsEnum(type) ){
-      code_ += "#FieldDef.Value.EnumDef {";
       const auto & enum_def = *type.enum_def;
+      code_ += "#FieldDef.Value.EnumDef {";
+
+      //StructDef is derived from Definition
+      GenDefinitionDebug( &enum_def );
+
 //      bool is_union;
       code_ += "#  is_union: \\";
       code_ += enum_def.is_union ? "true" : "false";
@@ -674,15 +760,16 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "d['start'] = start ";
 
     // IF we are a table, then we have a vtable.
-    if( struct_def.fixed ) {}// Then we are a struct
-    else {
+    if( struct_def.fixed ) {  // Then we are a struct
+      code_ += "d[{{FIELD_NAME}}] = {{FIELD_NAME}}()";
+    } else {
       code_ += "d['vtable_offset'] = bytes.decode_s32( start ) ";
       code_ += "d['vtable_start'] = d.start - d.vtable_offset ";
       code_ += "d['vtable'] = Dictionary() ";
       code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start ) ";
       code_ +=
           "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 ) ";
-      code_ += "for i in ((d.vtable_bytes / 2) - 2): ";
+      code_ += "for i in ((d.vtable.vtable_bytes / 2) - 2): ";
       code_ += "\tvar keys = vtable.keys()";
       code_ += "\tvar offsets = vtable.values()";
       code_ +=
@@ -697,7 +784,7 @@ class GdscriptGenerator : public BaseGenerator {
       Type field_type = field->value.type;
       Type element_type;
       code_.SetValue( "FIELD_NAME", Name( *field ) );
-      code_.SetValue( "FIELD_TYPE", TypeName(field_type.base_type ) );
+      code_.SetValue( "FIELD_TYPE", GetGodotType(field_type ) );
       if( IsSeries(field_type ) ){
         element_type = field_type.VectorType();
         code_.SetValue( "ELEMENT_TYPE", TypeName( field_type.element ) );
@@ -720,29 +807,30 @@ class GdscriptGenerator : public BaseGenerator {
       // TODO * Vector of Union
       // TODO * Fixed length Array
 
-      code_ += "var f = {'type':'{{FIELD_TYPE}}'}";
+      code_.SetValue("DICT", Name( *field ) + "_dict" );
+      code_ += "var {{DICT}} = {'type':'{{FIELD_TYPE}}'}";
 
       if( struct_def.fixed ) {  // we are a struct, and the fields are guaranteed to exist, and be scalars
       } else { // we are a table
         code_ += "if {{FIELD_NAME}}_is_present():";
         code_.IncrementIdentLevel();
-        code_ += "f['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
+        code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
         if( IsScalar( field_type.base_type ) ){
-          code_ += "f['value'] = {{FIELD_NAME}}()";
+          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
         } else if( IsVector( field_type) ) {
-          code_ += "f['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
-          code_ += "f['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
+          code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
+          code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
           code_ +=
-              "f['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
+              "{{DICT}}['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
           if (IsScalar(field_type.element)) {
           } else if (IsStruct(element_type)) {
           } else if (IsTable(element_type)) {
-            code_ += "f['value'] = {{FIELD_NAME}}().map( func( element ): return element.debug() )";
+            code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map( func( element ): return element.debug() )";
           }
         }
         code_.DecrementIdentLevel();
       }
-      code_ += "d['{{FIELD_NAME}}'] = f";
+      code_ += "d['{{FIELD_NAME}}'] = {{DICT}}";
       /*
        * # table_array: vector of table
         d.table_array['data'] = table_array().map( func( item ): return item.debug() )
@@ -797,6 +885,8 @@ class GdscriptGenerator : public BaseGenerator {
     GenBuilders(struct_def);
 
     GenCreateFunc( struct_def );
+    GenCreateFunc2( struct_def );
+
   }
 
   void GenSeriesAccessors( const FieldDef &field ){
@@ -1083,60 +1173,144 @@ class GdscriptGenerator : public BaseGenerator {
     bool add_sep = false;
     for (const auto &field : struct_def.fields.vec) {
       if( field->deprecated ) continue;
-      code_.SetValue("PARAM_NAME", Name(*field) );
-      code_.SetValue("PARAM_VALUE", "default" );
-      code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
-      //FIXME add default value if possible.
       if( add_sep ) code_ += "{{SEP}}";
+      code_.SetValue("PARAM_NAME", Name(*field) );
+      code_.SetValue("DEFAULT_VALUE", "default" );
+      // Scalar | Struct | Fixed length Array
+      // These items are added inline in the table, and do not require creating an offset ahead of time.
+      if( IsScalar(field->value.type.base_type) || IsStruct( field->value.type ) ){
+        code_.SetValue("PARAM_TYPE", GetGodotType(field->value.type) );
+      } else {
+        code_.SetValue("PARAM_TYPE", "int" );
+      }
       code_ += "{{PARAM_NAME}} : {{PARAM_TYPE}}\\";
+      //TODO add default value if possible.
       add_sep = true;
     }
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
-    code_ += "";
 
-    // All the non-inline objects need to be added to the builder before adding our object
-    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
-      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
-        const auto &field = **it;
-        if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
-          if( field.IsScalar() || IsStruct( field.value.type ) ){
-            // Scalars and Structs are added inline in the table, and do not require creating an offset ahead of time.
-            continue;
-          }
-          code_.SetValue("PARAM_NAME", Name(field) );
-          code_.SetValue("PARAM_TYPE", GetGodotType( field.value.type ) );
-          if( IsTable(field.value.type) ){
-            code_ += "# {{PARAM_NAME}} : {{PARAM_TYPE}}";
-            code_ += "# TODO var I haven't yet figured out how to create tables here";
-            continue;
-          }
-          if( IsSeries(field.value.type) ){
-            code_.SetValue("CREATE_FUNC", vector_create_func[field.value.type.element] );
-          }
-          if( IsString(field.value.type) ){
-            code_.SetValue("CREATE_FUNC", "create_String" );
-          }
-          code_ += "var {{PARAM_NAME}}_offset : int = _fbb.{{CREATE_FUNC}}( {{PARAM_NAME}} );";
-        }
-      }
-    }
-    code_ += "";
     // Create* function body
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
       for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
         const auto &field = **it;
         if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
-
           code_.SetValue("FIELD_NAME", Name( field ) );
-          if( field.IsScalar() || IsStruct( field.value.type) ){
-            code_.SetValue("PARAM_NAME", Name( field ) );
-          } else{
-            code_.SetValue("PARAM_NAME", Name( field ) + "_offset" );
+          code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}} );";
+        }
+      }
+    }
+    code_ += "return builder.finish();";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  void GenCreateFunc2( const StructDef &struct_def ){
+    // Generate a convenient CreateX function that uses the above builder
+    // to create a table in one go.
+
+    code_ += "static func Create{{STRUCT_NAME}}2( _fbb : FlatBufferBuilder, object : Variant ) -> int:";
+    code_.IncrementIdentLevel();
+
+    // All the non-inline objects need to be added to the builder before adding our object
+    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
+      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
+        const auto &field = **it;
+        if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
+
+          Type field_type = field.value.type;
+          Type element_type;
+          code_.SetValue("FIELD_NAME", Name( field ) );
+
+          // Scalar | Struct | Fixed length Array
+          // These items are added inline in the table, and do not require creating an offset ahead of time.
+          if( IsScalar(field_type.base_type) || IsStruct( field_type ) ){
+            continue;
+          }
+          if( IsTable( field_type ) ){
+            code_.SetValue("FIELD_TYPE", field_type.struct_def->name );
+          }
+          if( IsSeries( field_type) ){
+            code_.SetValue("FIELD_TYPE", "Vector" );
+            element_type = field_type.VectorType();
+            code_.SetValue("ELEMENT_TYPE", TypeName(element_type.base_type) );
+            if( IsTable(element_type) ){
+              code_.SetValue("ELEMENT_TYPE", element_type.struct_def->name );
+            }
           }
 
-          code_ += "builder.add_{{FIELD_NAME}}( {{PARAM_NAME}} );";
+          code_.SetValue("GODOT_TYPE", GetGodotType( field_type ) );
+          code_.SetValue("CREATE_FUNC", field_type.struct_def->name );
+
+          code_ += "# {{FIELD_NAME}} : {{FIELD_TYPE}} \\";
+          code_ += IsSeries(field_type ) ? "of {{ELEMENT_TYPE}}" : "";
+
+          //Table
+          if( IsTable( field_type ) ){
+            code_ += "var {{FIELD_NAME}}_offset : int = Create{{ELEMENT_TYPE}}2( _fbb, object.{{FIELD_NAME}} );";
+          }
+          //TODO Union
+          //String
+          else if( IsString( field_type ) ) {
+            code_ += "var {{FIELD_NAME}}_offset : int = _fbb.create_String( object.{{FIELD_NAME}} );";
+          }
+          // Vector of
+          else if( IsVector( field_type ) ){
+            //Scalar
+            if( IsScalar( element_type.base_type ) ){
+              code_.SetValue("CREATE_FUNC", vector_create_func[element_type.base_type] );
+              code_ += "var {{FIELD_NAME}}_offset : int = _fbb.{{CREATE_FUNC}}( object.{{FIELD_NAME}} );";
+            }
+            //TODO - Struct
+            else if( IsStruct( element_type ) ) {
+              GenFieldDebug( field );
+            }
+            // Table
+            else if( IsTable( element_type ) ) {
+              code_ += "var array : Array = object.{{FIELD_NAME}}";
+              code_ += "var offsets : PackedInt32Array";
+              code_ += "offsets.resize( array.size() )";
+              code_ += "for index in array.size():";
+              code_.IncrementIdentLevel();
+              code_ += "var item = array[index]";
+              code_ += "offsets[index] = Create{{ELEMENT_TYPE}}2( _fbb, item )";
+              code_.DecrementIdentLevel();
+              code_ += "var {{FIELD_NAME}}_offset : int = _fbb.create_vector_offset( offsets )";
+            }
+            //TODO - String
+            //TODO - Vector
+            else {
+              GenFieldDebug( field );
+            }
+          }
+          //TODO Vector of Union
+          else{
+            GenFieldDebug( field );
+          }
+          code_ += "";
+        }
+      }
+    }
+
+    // Create* function body
+    code_ += "# build the {{STRUCT_NAME}}";
+    code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb )";
+    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
+      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
+        const auto &field = **it;
+        if( ! field.deprecated && ( ! struct_def.sortbysize || size == SizeOf(field.value.type.base_type) ) ){
+
+          code_.SetValue("FIELD_NAME", Name( field ) );
+          Type field_type = field.value.type;
+
+          // Scalar | Struct | Fixed length Array
+          // These items are added inline in the table, and do not require creating an offset ahead of time.
+          if( IsScalar(field_type.base_type) || IsStruct( field_type ) ){
+            code_ += "builder.add_{{FIELD_NAME}}( object.{{FIELD_NAME}} )";
+          } else {
+            code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_offset )";
+          }
         }
       }
     }
