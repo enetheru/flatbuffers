@@ -690,11 +690,12 @@ class GdscriptGenerator : public BaseGenerator {
             // Struct
           else if( IsStruct( type ) ) {
             code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
-            code_ += "if not field_offset: return null";
             if( IsBuiltin( type ) ) {
+              code_ += "if not field_offset: return {{GODOT_TYPE}}()";
               code_ += "return decode_{{GODOT_TYPE}}( start + field_offset )";
             } else {
               // TODO What if the object is from an included file?
+              code_ += "if not field_offset: return null";
               code_ += "return parent.Get{{GODOT_TYPE}}( start + field_offset, bytes )";
             }
           }
@@ -737,7 +738,7 @@ class GdscriptGenerator : public BaseGenerator {
           else if( IsString( type ) ) {
             code_ += "var field_start = get_field_start( vtable.{{OFFSET_NAME}} )";
             code_ += "if not field_start: return ''";
-            code_ += "return bytes.decode_String( field_start )";
+            code_ += "return decode_String( field_start )";
           }
           code_.DecrementIdentLevel();
           code_ += "";
@@ -764,6 +765,7 @@ class GdscriptGenerator : public BaseGenerator {
           code_ += "array_start += 4";
 
           Type element = type.VectorType();
+          code_.SetValue("ELEMENT_TYPE", GetGodotType( element ) );
           code_.SetValue("ELEMENT_SIZE", element_size[ element.base_type ] );
           code_.SetValue("DECODE_FUNC", decode_funcs[ element.base_type ] );
           // Scalar
@@ -859,7 +861,7 @@ class GdscriptGenerator : public BaseGenerator {
           }
           // String
           else if( IsString(element ) ){
-            code_ += "var array : {{ARRAY_TYPE}}";
+            code_ += "var array : {{GODOT_TYPE}}";
             code_ += "array.resize( array_size )";
             code_ += "for i in array_size:";
             code_.IncrementIdentLevel();
@@ -948,46 +950,60 @@ class GdscriptGenerator : public BaseGenerator {
       code_ += field->IsRequired() ? "(required)" : "";
 
       // Field Types:
-      // TODO * Scalar
-      // TODO * Struct
-      // TODO * Table
+      code_.SetValue("DICT", Name( *field ) + "_dict" );
+      code_ += "var {{DICT}} = {'type':'{{FIELD_TYPE}}'}";
+      code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
+
+
+      if( ! struct_def.fixed ){ // If we are a table, then all fields are optional.
+        code_ += "if {{FIELD_NAME}}_is_present():";
+        code_.IncrementIdentLevel();
+      }
+
+      // Scalar
+      if( IsScalar( field_type.base_type ) ){
+        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+      }
+      // Struct
+      else if( IsStruct(field_type) ){
+        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+      }
+      // Table
+      else if( IsTable(field_type ) ){
+        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().debug()";
+      }
       // TODO * Union
-      // TODO * Vector of
-      // TODO     - Scalar
-      // TODO     - Struct
-      // TODO     - Table
+      // Vector of
+      else if( IsVector( field_type) ) {
+        code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
+        code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ +=
+            "{{DICT}}['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
+        // Scalar
+        if (IsScalar(field_type.element)) {
+          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+        }
+        // Struct | Table
+        else if( IsStruct(element_type) || IsTable(element_type) ) {
+          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
+          code_ += "\tfunc( element ): return element.debug() if element else null";
+          code_ += ")";
+        }
+        // String
+        if( IsString(element_type) ){
+          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+        }
+        // TODO     - Vector
+      }
+
       // TODO * Vector of Union
       // TODO * Fixed length Array
 
-      code_.SetValue("DICT", Name( *field ) + "_dict" );
-      code_ += "var {{DICT}} = {'type':'{{FIELD_TYPE}}'}";
-
-      if( struct_def.fixed ) {  // we are a struct, and the fields are guaranteed to exist, and be scalars
-      } else { // we are a table
-        code_ += "if {{FIELD_NAME}}_is_present():";
-        code_.IncrementIdentLevel();
-        code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
-        if( IsScalar( field_type.base_type ) ){
-          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
-        } else if( IsVector( field_type) ) {
-          code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
-          code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
-          code_ +=
-              "{{DICT}}['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
-          if (IsScalar(field_type.element)) {
-          } else if( IsStruct(element_type) || IsTable(element_type) ) {
-            code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
-            code_ += "\tfunc( element ): return element.debug() if element else null";
-            code_ += ")";
-          }
-        }
+      if( ! struct_def.fixed ){ // Come back down after : if {{FIELD_NAME}}_is_present():
         code_.DecrementIdentLevel();
+        code_ += "";
       }
       code_ += "d['{{FIELD_NAME}}'] = {{DICT}}";
-      /*
-       * # table_array: vector of table
-        d.table_array['data'] = table_array().map( func( item ): return item.debug() )
-       */
     }
     code_ += "return d ";
     code_.DecrementIdentLevel();
@@ -1172,6 +1188,19 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
 
+//    for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
+//      for( auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it ) {
+//        const auto &field = **it;
+//        if( !field.deprecated && (!struct_def.sortbysize || size == SizeOf( field.value.type.base_type )) ) {
+//          if( ! IsStruct( field.value.type ) ) continue;
+//          // FIXME this might also include fixed sized arrays
+//          code_.SetValue( "FIELD_NAME", Name( field ) );
+//          code_ += "# Create {{FIELD_NAME}}";
+//          code_ += "var {{FIELD_NAME}}_offset";
+//        }
+//      }
+//    }
+
     // Create* function body
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
@@ -1223,8 +1252,6 @@ class GdscriptGenerator : public BaseGenerator {
           }
 
           code_.SetValue("GODOT_TYPE", GetGodotType( field_type ) );
-          code_.SetValue("CREATE_FUNC", field_type.struct_def->name );
-
           code_ += "# {{FIELD_NAME}} : {{FIELD_TYPE}} \\";
           code_ += IsSeries(field_type ) ? "of {{ELEMENT_TYPE}}" : "";
 
@@ -1257,7 +1284,11 @@ class GdscriptGenerator : public BaseGenerator {
               code_.DecrementIdentLevel();
               code_ += "var {{FIELD_NAME}}_offset : int = _fbb.create_vector_offset( offsets )";
             }
-            //TODO - String
+            // String
+            else if( IsString( element_type ) ){
+              code_.SetValue("CREATE_FUNC", vector_create_func[element_type.base_type] );
+              code_ += "var {{FIELD_NAME}}_offset : int = _fbb.{{CREATE_FUNC}}( object.{{FIELD_NAME}} );";
+            }
             //TODO - Vector
             else {
               GenFieldDebug( field );
