@@ -209,7 +209,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
     code_ += "static func GetRoot( data : PackedByteArray ) -> {{ROOT_STRUCT}}:";
     code_.IncrementIdentLevel();
-    code_ += "return Get{{ROOT_STRUCT}}( data.decode_u32(0), data )";
+    code_ += "return Get{{ROOT_STRUCT}}( data )";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -633,9 +633,14 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "";
   }
 
-  void GenStaticFactory(){
-    code_ += "static func Get{{TABLE_NAME}}( _start : int, _bytes : PackedByteArray ) -> {{TABLE_NAME}}:";
+  void GenStaticFactory( const StructDef &struct_def ){
+    // The root struct has a convenience that the start defaults to zero,
+    // and is decoded if zero
+    bool is_root = &struct_def == parser_.root_struct_def_;
+    code_.SetValue( "DEFAULT", is_root ? "= 0" : "" );
+    code_ += "static func Get{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
+    if( is_root ) code_ += "if not _start: _start = _bytes.decode_u32(0)";
     code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
     code_ += "new_{{TABLE_NAME}}.start = _start";
     code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
@@ -716,7 +721,7 @@ class GdscriptGenerator : public BaseGenerator {
             } else {
               // TODO What if the object is from an included file?
               code_ += "if not field_offset: return null";
-              code_ += "return parent.Get{{GODOT_TYPE}}( start + field_offset, bytes )";
+              code_ += "return parent.Get{{GODOT_TYPE}}( bytes, start + field_offset )";
             }
           }
             // Table
@@ -727,7 +732,7 @@ class GdscriptGenerator : public BaseGenerator {
               code_ += "return decode_{{GODOT_TYPE}}( field_start )";
             } else {
               // TODO What if the object is from an included file?
-              code_ += "return parent.Get{{GODOT_TYPE}}( field_start, bytes )";
+              code_ += "return parent.Get{{GODOT_TYPE}}( bytes, field_start )";
             }
           }
             // Union
@@ -747,7 +752,7 @@ class GdscriptGenerator : public BaseGenerator {
               code_.SetValue( "GODOT_TYPE", GetGodotType( val->union_type ) );
               code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
               code_.IncrementIdentLevel();
-              code_ += "return parent.Get{{UNION_TYPE}}( field_start, bytes )";
+              code_ += "return parent.Get{{UNION_TYPE}}( bytes, field_start )";
               code_.DecrementIdentLevel();
             }
             code_ += "_: pass";
@@ -1052,7 +1057,7 @@ class GdscriptGenerator : public BaseGenerator {
     // assumes that TABLE_NAME was set previously
     code_.SetValue("TABLE_NAME", Name(struct_def ) );
 
-    GenStaticFactory();
+    GenStaticFactory( struct_def );
 
     { // generate Flatbuffer derived class
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
