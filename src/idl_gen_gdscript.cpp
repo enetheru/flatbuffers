@@ -1159,14 +1159,13 @@ class GdscriptGenerator : public BaseGenerator {
       else if( IsTable( type ) ) {
         code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
-      // TODO Union
+      // Union
       else if( IsUnion( type ) ) {
-        code_ += "# TODO Union";
-        code_ += "pass";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       // String
       else if( IsString( type ) ) {
-        code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       // TODO Vector of
       else if( IsVector( type ) ) {
