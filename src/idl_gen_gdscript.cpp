@@ -141,14 +141,16 @@ class GdscriptGenerator : public BaseGenerator {
   {
     code_.SetPadding("\t");
 
+    // FIXME change this to something line internal types or something. because there will be some builtins that are
+    // able to be decoded and some that arent. so I'm not sure how things are going right now.
     static const char *const builtin_types_[] = {
-        "Object",
         "String",
         "Vector3",
       "Vector3i",
       "Color",
       nullptr
     };
+    for (auto kw = builtin_types_; *kw; kw++) builtin_types.insert(*kw);
 
     static const char *const keywords_[] = {
       "if",
@@ -187,6 +189,8 @@ class GdscriptGenerator : public BaseGenerator {
       // My used keywords
       "bytes",
       "start",
+      // Builtin Types that need escaping.
+      "Object",
       nullptr,
     };
     for (auto kw = keywords_; *kw; kw++) keywords.insert(*kw);
@@ -309,7 +313,11 @@ class GdscriptGenerator : public BaseGenerator {
       return "String";
     }
     else if( IsStruct( type ) || IsTable( type ) ){
-      return EscapeKeyword( type.struct_def->name );
+      if( IsBuiltin( type ) ) {
+        return type.struct_def->name;
+      } else {
+        return EscapeKeyword( type.struct_def->name );
+      }
     }
     else if( IsSeries( type ) ){
       if( IsScalar(type.element) ){
@@ -1173,8 +1181,9 @@ class GdscriptGenerator : public BaseGenerator {
       else if( IsStruct( type ) ) {
         if( IsBuiltin( type ) ){
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        } else {
+          code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
         }
-        code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
       }
       // Table
       else if( IsTable( type ) ) {
