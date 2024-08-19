@@ -68,22 +68,23 @@ const char *vector_create_func[] = {
   "", /* VECTOR */ "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
 };
 
-const char *decode_funcs[] = {
-"",               // 0 NONE
-"decode_u8",      // 1 UTYPE
-"decode_u8",      // 2 BOOL
-"decode_s8",      // 3 CHAR
-"decode_u8",      // 4 UCHAR
-"decode_s16",     // 5 SHORT
-"decode_u16",     // 6 USHORT
-"decode_s32",     // 7 INT
-"decode_u32",     // 8 UINT
-"decode_s64",     // 9 LONG
-"decode_u64",     //10 ULONG
-"decode_float",   //11 FLOAT
-"decode_double",  //12 DOUBLE
-"decode_String",  //13 STRING
-"", /* VECTOR */ "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
+// PackedByteArray types for encode_* and decode_* functions
+const char *pba_types[] = {
+    "",        // 0 NONE
+    "u8",      // 1 UTYPE
+    "u8",      // 2 BOOL
+    "s8",      // 3 CHAR
+    "u8",      // 4 UCHAR
+    "s16",     // 5 SHORT
+    "u16",     // 6 USHORT
+    "s32",     // 7 INT
+    "u32",     // 8 UINT
+    "s64",     // 9 LONG
+    "u64",     //10 ULONG
+    "float",   //11 FLOAT
+    "double",  //12 DOUBLE
+    ""/*STRING*/,""/* VECTOR */, ""/* STRUCT */,
+    ""/* UNION */, ""/* ARRAY */, ""/* VECTOR64 */,
 };
 
 const char *element_size[] = {
@@ -579,12 +580,9 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
-    code_ += "static func Get{{STRUCT_NAME}}( _start : int, _bytes : PackedByteArray ):";
+    code_ += "static func Get{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int ):";
     code_.IncrementIdentLevel();
-    code_ += "var new_{{STRUCT_NAME}} = {{STRUCT_NAME}}.new()";
-    code_ += "new_{{STRUCT_NAME}}.start = _start";
-    code_ += "new_{{STRUCT_NAME}}.bytes = _bytes";
-    code_ += "return new_{{STRUCT_NAME}}";
+    code_ += "return {{STRUCT_NAME}}.new( _bytes, _start )";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -593,6 +591,59 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
     code_ += "# struct";
+
+    // NOTE: This is an experiment
+    // I am in a bit of a predicament, as to add a struct to a buffer I need a struct with data to push to it.
+    // But this object doubles as a getter from a buffer.. its weird.
+    // I can write to the buffer, or I can create separate fields.
+    // field names are also functions. Lets make a shitty version first.
+    // If I generate a struct with no backing data, then I am up creek without a paddle.
+    // perhaps I can create a buffer with the new keyword.
+
+    code_.SetValue("BYTES", NumToString(struct_def.bytesize));
+    code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
+    code_.IncrementIdentLevel();
+    code_ += "if bytes_.is_empty(): ";
+    code_.IncrementIdentLevel();
+    code_ += "var data = PackedByteArray()";
+    code_ += "data.resize( {{BYTES}} )";
+    code_ += "bytes = data";
+    code_ += "start = 0";
+    code_.DecrementIdentLevel();
+    code_ += "else: bytes = bytes_; start = start_";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+    // How do I set the data for the field? :
+    for (const auto &field : struct_def.fields.vec) {
+      if( field->deprecated ) continue; // Deprecated fields won't be accessible.
+
+      const auto &type = field->value.type;
+      code_.SetValue( "FIELD_NAME", Name(*field) );
+      code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
+      code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
+
+      code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ):";
+      code_.IncrementIdentLevel();
+      if( field->IsScalar() ){
+        code_.SetValue("PBA", pba_types[ type.base_type ] );
+        code_ += "var data = bytes";
+        code_ += "data.encode_{{PBA}}(start + {{OFFSET}}, value )";
+        code_ += "bytes = data";
+      }
+      else if( IsStruct( type) ){
+        code_.SetValue("STRUCT_NAME", Name( struct_def ) );
+        code_ += "var parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+      }
+      else {
+        code_ += "#TODO - Unhandled Type";
+        code_ += "pass";
+        GenFieldDebug( *field );
+      }
+      code_.DecrementIdentLevel();
+      code_ += "";
+    }
 
     // Generate the accessor functions, in the form:
     // func name() -> type :
@@ -607,26 +658,24 @@ class GdscriptGenerator : public BaseGenerator {
       code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
       code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
 
+      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+      code_.IncrementIdentLevel();
       if( field->IsScalar() ){
-
-        code_.SetValue("DECODE_FUNC", decode_funcs[ type.base_type] );
-        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-        code_.IncrementIdentLevel();
-        code_ += "return bytes.{{DECODE_FUNC}}(start + {{OFFSET}})\\";
+        code_.SetValue("PBA", pba_types[ type.base_type ] );
+        code_ += "return bytes.decode_{{PBA}}(start + {{OFFSET}})\\";
         code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
-        code_.DecrementIdentLevel();
+
       }
       else if( IsStruct( type) ){
         code_.SetValue("STRUCT_NAME", Name( struct_def ) );
-        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-        code_.IncrementIdentLevel();
         code_ += "return parent.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
-        code_.DecrementIdentLevel();
       }
       else {
-        code_ += " #TODO - Unhandled Type";
+        code_ += "#TODO - Unhandled Type";
+        code_ += "pass";
         GenFieldDebug( *field );
       }
+      code_.DecrementIdentLevel();
       code_ += "";
     }
     code_.DecrementIdentLevel();
@@ -640,6 +689,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_.SetValue( "DEFAULT", is_root ? "= 0" : "" );
     code_ += "static func Get{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
+    code_ += "if _bytes.is_empty(): return null";
     if( is_root ) code_ += "if not _start: _start = _bytes.decode_u32(0)";
     code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
     code_ += "new_{{TABLE_NAME}}.start = _start";
@@ -705,11 +755,11 @@ class GdscriptGenerator : public BaseGenerator {
 
           // Scalar
           if( field.IsScalar() ) {
-            code_.SetValue( "DECODE_FUNC", decode_funcs[ type.base_type ] );
+            code_.SetValue( "PBA", pba_types[ type.base_type ] );
             code_ += "var foffset = get_field_offset( vtable.{{OFFSET_NAME}} )";
             code_ += "if not foffset: return " + field.value.constant + "\\";
             code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
-            code_ += "return bytes.{{DECODE_FUNC}}( start + foffset )\\";
+            code_ += "return bytes.decode_{{PBA}}( start + foffset )\\";
             code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
           }
             // Struct
@@ -792,7 +842,7 @@ class GdscriptGenerator : public BaseGenerator {
           Type element = type.VectorType();
           code_.SetValue("ELEMENT_TYPE", GetGodotType( element ) );
           code_.SetValue("ELEMENT_SIZE", element_size[ element.base_type ] );
-          code_.SetValue("DECODE_FUNC", decode_funcs[ element.base_type ] );
+          code_.SetValue("PBA", pba_types[ element.base_type ] );
           // Scalar
           if( IsScalar(element.base_type) ){
             switch( element.base_type ) {
@@ -821,7 +871,7 @@ class GdscriptGenerator : public BaseGenerator {
                 code_ += "array.resize( array_size )";
                 code_ += "for i in array_size:";
                 code_.IncrementIdentLevel();
-                code_ += "array[i] = bytes.{{DECODE_FUNC}}( array_start + i * {{ELEMENT_SIZE}})";
+                code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
                 code_.DecrementIdentLevel();
                 code_ += "return array";
                 code_.DecrementIdentLevel();
@@ -832,7 +882,7 @@ class GdscriptGenerator : public BaseGenerator {
                 code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
                 code_ += "if not array_start: return 0";
                 code_ += "array_start += 4";
-                code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
+                code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
                 code_.DecrementIdentLevel();
                 code_ += "";
                 return;
@@ -851,7 +901,7 @@ class GdscriptGenerator : public BaseGenerator {
                 code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
                 code_ += "if not array_start: return 0";
                 code_ += "array_start += 4";
-                code_ += "return bytes.{{DECODE_FUNC}}( array_start + index * {{ELEMENT_SIZE}})";
+                code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
                 code_.DecrementIdentLevel();
                 code_ += "";
                 return;
@@ -877,7 +927,7 @@ class GdscriptGenerator : public BaseGenerator {
             code_ += "for i in array_size:";
             code_.IncrementIdentLevel();
             code_ += "var pos = array_start + i * 4";
-            code_ += "array[i] = parent.Get{{ELEMENT_TYPE}}( pos + bytes.decode_u32( pos ), bytes )";
+            code_ += "array[i] = parent.Get{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
             code_.DecrementIdentLevel();
             code_ += "return array";
             code_.DecrementIdentLevel();
@@ -894,7 +944,7 @@ class GdscriptGenerator : public BaseGenerator {
             code_.IncrementIdentLevel();
             code_ += "var idx = array_start + i * {{ELEMENT_SIZE}}";
             code_ += "var element_start = idx + bytes.decode_u32( idx )";
-            code_ += "array[i] = {{DECODE_FUNC}}( element_start )";
+            code_ += "array[i] = decode_String( element_start )";
             code_.DecrementIdentLevel();
             code_ += "return array";
             code_.DecrementIdentLevel();
@@ -908,7 +958,7 @@ class GdscriptGenerator : public BaseGenerator {
             code_ += "array_start += 4";
             code_ += "var string_start = array_start + index * {{ELEMENT_SIZE}}";
             code_ += "string_start += bytes.decode_u32( string_start )";
-            code_ += "return {{DECODE_FUNC}}( string_start )";
+            code_ += "return decode_String( string_start )";
             code_.DecrementIdentLevel();
             code_ += "";
             return;
@@ -935,26 +985,27 @@ class GdscriptGenerator : public BaseGenerator {
     // There are only two options on how we got here
     // Either we are a table, or we are a struct.
     // Generate Pretty Printer
-    code_ += "func debug():";
+    code_ += "func debug() -> Dictionary:";
     code_.IncrementIdentLevel();
-    code_ += "var d : Dictionary = {} ";
-    code_ += "d['start'] = start ";
+    code_ += "var d : Dictionary = {}";
+    code_ += "d['buffer_size'] = bytes.size()";
+    code_ += "d['start'] = start";
 
     // IF we are a table, then we have a vtable.
     if( struct_def.fixed ) {  // Then we are a struct
       code_ += "d[{{FIELD_NAME}}] = {{FIELD_NAME}}()";
     } else {
-      code_ += "d['vtable_offset'] = bytes.decode_s32( start ) ";
-      code_ += "d['vtable_start'] = d.start - d.vtable_offset ";
-      code_ += "d['vtable'] = Dictionary() ";
-      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start ) ";
-      code_ +=
-          "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 ) ";
-      code_ += "for i in ((d.vtable.vtable_bytes / 2) - 2): ";
+      code_ += "d['vtable_offset'] = bytes.decode_s32( start )";
+      code_ += "d['vtable_start'] = d.start - d.vtable_offset";
+      code_ += "d['vtable'] = Dictionary()";
+      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start )";
+      code_ += "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 )";
+      code_ += "";
+      code_ += "for i in ((d.vtable.vtable_bytes / 2) - 2):";
       code_ += "\tvar keys = vtable.keys()";
       code_ += "\tvar offsets = vtable.values()";
-      code_ +=
-          "\td.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] ) ";
+      code_ += "\td.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] )";
+      code_ += "";
     }
 
     for (const auto &field : struct_def.fields.vec) {
@@ -1147,13 +1198,12 @@ class GdscriptGenerator : public BaseGenerator {
         code_.SetValue("TYPE", add_element_func[type.base_type] );
         code_ += "fbb_.{{TYPE}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
       }
-      // TODO Struct
+      // Struct
       else if( IsStruct( type ) ) {
         if( IsBuiltin( type ) ){
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         }
-        code_ += "# TODO non builtin struct";
-        code_ += "pass";
+        code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
       }
       // Table
       else if( IsTable( type ) ) {
