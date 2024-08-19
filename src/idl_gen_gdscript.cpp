@@ -587,18 +587,8 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "";
 
     // Generate the class definition
-
     code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
-    code_ += "# struct";
-
-    // NOTE: This is an experiment
-    // I am in a bit of a predicament, as to add a struct to a buffer I need a struct with data to push to it.
-    // But this object doubles as a getter from a buffer.. its weird.
-    // I can write to the buffer, or I can create separate fields.
-    // field names are also functions. Lets make a shitty version first.
-    // If I generate a struct with no backing data, then I am up creek without a paddle.
-    // perhaps I can create a buffer with the new keyword.
 
     code_.SetValue("BYTES", NumToString(struct_def.bytesize));
     code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
@@ -623,60 +613,43 @@ class GdscriptGenerator : public BaseGenerator {
       code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
       code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
 
-      code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ):";
-      code_.IncrementIdentLevel();
-      if( field->IsScalar() ){
+      // Scalars
+      if( field->IsScalar() ) {
         code_.SetValue("PBA", pba_types[ type.base_type ] );
+        code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}}";
+        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_.IncrementIdentLevel();
+        code_ += "get(): return bytes.decode_{{PBA}}(start + {{OFFSET}})\\";
+        code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
+        code_ += "set( v ):";
+        code_.IncrementIdentLevel();
         code_ += "var data = bytes";
-        code_ += "data.encode_{{PBA}}(start + {{OFFSET}}, value )";
+        code_ += "data.encode_{{PBA}}(start + {{OFFSET}}, v )";
         code_ += "bytes = data";
+        code_.DecrementIdentLevel();
+        code_.DecrementIdentLevel();
+        code_ += "";
       }
+      // Structs
       else if( IsStruct( type) ){
         code_.SetValue("STRUCT_NAME", Name( struct_def ) );
+        code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ):";
+        code_.IncrementIdentLevel();
         code_ += "var parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
         code_ += "parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
-      }
-      else {
-        code_ += "#TODO - Unhandled Type";
-        code_ += "pass";
-        GenFieldDebug( *field );
-      }
-      code_.DecrementIdentLevel();
-      code_ += "";
-    }
-
-    // Generate the accessor functions, in the form:
-    // func name() -> type :
-    for (const auto &field : struct_def.fields.vec) {
-      if (field->deprecated) {
-        // Deprecated fields won't be accessible.
-        continue;
-      }
-      code_.SetValue( "FIELD_NAME", Name(*field) );
-
-      const auto &type = field->value.type;
-      code_.SetValue( "OFFSET" , NumToString(field->value.offset) );
-      code_.SetValue( "GODOT_TYPE", GetGodotType(type) );
-
-      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-      code_.IncrementIdentLevel();
-      if( field->IsScalar() ){
-        code_.SetValue("PBA", pba_types[ type.base_type ] );
-        code_ += "return bytes.decode_{{PBA}}(start + {{OFFSET}})\\";
-        code_ += IsEnum( type ) ? " as {{GODOT_TYPE}}" : "";
-
-      }
-      else if( IsStruct( type) ){
-        code_.SetValue("STRUCT_NAME", Name( struct_def ) );
+        code_.DecrementIdentLevel();
+        code_ += "";
+        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
         code_ += "return parent.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_.DecrementIdentLevel();
+        code_ += "";
       }
       else {
         code_ += "#TODO - Unhandled Type";
         code_ += "pass";
         GenFieldDebug( *field );
       }
-      code_.DecrementIdentLevel();
-      code_ += "";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -787,10 +760,8 @@ class GdscriptGenerator : public BaseGenerator {
           }
             // Union
           else if( IsUnion( type ) ) {
-            code_ += "var foffset = get_field_offset( vtable.{{OFFSET_NAME}} )";
-            code_ += "if not foffset: return null";
-            code_ += "var field_start = get_field_start( foffset )";
-
+            code_ += "var field_start = get_field_start( vtable.{{OFFSET_NAME}} )";
+            code_ += "if not field_start: return null";
             // match the type
             code_ += "match( {{FIELD_NAME}}_type() ):";
             code_.IncrementIdentLevel();
