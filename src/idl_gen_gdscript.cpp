@@ -274,23 +274,25 @@ class GdscriptGenerator : public BaseGenerator {
   }
 
   bool IsBuiltin( const Type &type ){
-    if( type.struct_def ) {
-      return builtin_types.find(type.struct_def->name) not_eq builtin_types.end();
-    }
-    return false;
+    return type.struct_def != nullptr
+      and builtin_types.find( type.struct_def->name ) not_eq builtin_types.end();
   }
 
   bool IsIncluded( const Type &type ){
-    if( not type.struct_def ) return false;
-    if( type.struct_def->file not_eq parser_.root_struct_def_->file ) return true;
-    return false;
+    return type.struct_def != nullptr
+      and type.struct_def->file not_eq parser_.root_struct_def_->file;
   }
 
   std::string GetInclude(const Type &type ){
-    if( not (IsStruct( type ) or IsTable( type )) ) return "";
     if( IsBuiltin(type) ) return "";
-    if( type.struct_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.struct_def->file];
-    if( type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
+    if( IsStruct( type ) or IsTable(type) ){
+      if( type.struct_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.struct_def->file];
+      if( type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
+    }
+    if( IsUnion( type ) ){
+      if( type.enum_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.enum_def->file];
+      if( type.enum_def->underlying_type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
+    }
     return "";
   }
 
@@ -759,8 +761,6 @@ class GdscriptGenerator : public BaseGenerator {
         const auto &type = field.value.type;
         code_.SetValue( "FIELD_NAME", Name( field ) );
         code_.SetValue( "GODOT_TYPE", GetGodotType( type ) );
-
-        const bool can_include = (IsStruct(type) or IsTable(type)) and type.struct_def->file not_eq parser_.root_struct_def_->file;
         code_.SetValue( "INCLUDE", IsIncluded(type) ? GetInclude(type) : "" );
 
         if( not IsSeries( type ) ) {
