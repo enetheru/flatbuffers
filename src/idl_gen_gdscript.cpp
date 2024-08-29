@@ -141,18 +141,67 @@ class GdscriptGenerator final : public BaseGenerator {
   {
     code_.SetPadding("\t");
 
-    // FIXME change this to something line internal types or something. because there will be some builtins that are
-    // able to be decoded and some that arent. so I'm not sure how things are going right now.
-    static constexpr char const *builtin_types_[] = {
-        "String",
-        "Vector3",
+    // == Godot Types ==
+
+    // atomic types
+    // bool,
+    // int,
+    // float,
+    // String
+
+    static constexpr char const *godot_structs[] = {
+      "Vector2",
+      "Vector2i",
+      "Rect2",
+      "Rect2i",
+      "Vector3",
       "Vector3i",
+      "Transform2D",
+      "Vector4",
+      "Vector4i",
+      "Plane",
+      "Quaternion",
+      "AABB",
+      "Basis",
+      "Transform3D",
+      "Projection",
       "Color",
       nullptr
     };
-    for (auto kw = builtin_types_; *kw; kw++) builtin_types.insert(*kw);
 
-    static const char *keywords_[] = {
+    static constexpr char const *godot_stringlike[] = {
+      "String",
+      "StringName",
+      "NodePath",
+      nullptr
+    };
+
+    static constexpr char const *godot_composite[] = {
+      "Rid",
+      "Object",
+      "Callable",
+      "Signal",
+      "Dictionary",
+      nullptr
+    };
+
+    static constexpr char const *godot_arraylike[] = {
+      "Array",
+      "packed_byte_array",
+      "packed_int32_array",
+      "packed_int64_array",
+      "packed_float32_array",
+      "packed_float64_array",
+      "packed_string_array",
+      "packed_vector2_array",
+      "packed_vector3_array",
+      "packed_color_array",
+      "packed_vector4_array",
+      nullptr
+    };
+    for (auto kw = godot_structs; *kw; kw++) builtin_structs.insert(*kw);
+
+    static constexpr char const *gdscript_keywords[] = {
       "if",
       "elif",
       "else",
@@ -186,15 +235,23 @@ class GdscriptGenerator final : public BaseGenerator {
       "TAU",
       "INF",
       "NAN",
-      // My used keywords
-      "bytes",
-      "start",
-      // Builtin Types that need escaping.
-      "Object",
       nullptr,
     };
-    for (auto kw = keywords_; *kw; kw++) keywords.insert(*kw);
-    for (auto kw = builtin_types_; *kw; kw++) keywords.insert(*kw);
+
+    static constexpr char const *my_keywords[] = {
+      "bytes",
+      "start",
+      nullptr
+    };
+
+
+    for (auto kw = godot_structs; *kw; kw++) keywords.insert(*kw);
+    for (auto kw = godot_stringlike; *kw; kw++) keywords.insert(*kw);
+    for (auto kw = godot_composite; *kw; kw++) keywords.insert(*kw);
+    for (auto kw = godot_arraylike; *kw; kw++) keywords.insert(*kw);
+    for (auto kw = gdscript_keywords; *kw; kw++) keywords.insert(*kw);
+    for (auto kw = my_keywords; *kw; kw++) keywords.insert(*kw);
+
   }
 
   // Iterate through all definitions we haven't. Generate code for (enums,
@@ -264,7 +321,7 @@ class GdscriptGenerator final : public BaseGenerator {
   CodeWriter code_;
 
   std::unordered_set<std::string> keywords;
-  std::unordered_set<std::string> builtin_types;
+  std::unordered_set<std::string> builtin_structs;
   std::unordered_map<std::string,std::string> include_map;
 
   const IDLOptionsGdscript opts_;
@@ -275,7 +332,7 @@ class GdscriptGenerator final : public BaseGenerator {
 
   bool IsBuiltin( const Type &type ){
     return type.struct_def != nullptr
-      and builtin_types.find( type.struct_def->name ) not_eq builtin_types.end();
+      and builtin_structs.find( type.struct_def->name ) not_eq builtin_structs.end();
   }
 
   bool IsIncluded( const Type &type ) const {
@@ -778,12 +835,11 @@ class GdscriptGenerator final : public BaseGenerator {
           }
             // Struct
           else if( IsStruct( type ) ) {
-            code_.SetValue( "INCLUDE",  GetInclude(type) );
-            code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
             if( IsBuiltin( type ) ) {
-              code_ += "if not field_offset: return {{GODOT_TYPE}}()";
-              code_ += "return decode_{{GODOT_TYPE}}( start + field_offset )";
+              code_ += "return Get{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
             } else {
+              code_.SetValue( "INCLUDE",  GetInclude(type) );
+              code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
               code_ += "if not field_offset: return null";
               code_ += "return {{INCLUDE}}Get{{GODOT_TYPE}}( bytes, start + field_offset )";
             }
