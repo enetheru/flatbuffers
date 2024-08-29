@@ -15,16 +15,16 @@
 namespace flatbuffers {
 
 // Make the string upper case
-static inline std::string ToUpper(std::string val) {
-  std::locale loc;
+static std::string ToUpper(std::string val) {
+  const std::locale loc;
   auto &facet = std::use_facet<std::ctype<char>>(loc);
   facet.toupper(&val[0], &val[0] + val.length());
   return val;
 }
 
 // Make the string lower case
-static inline std::string ToLower(std::string val) {
-  std::locale loc;
+static std::string ToLower(std::string val) {
+  const std::locale loc;
   auto &facet = std::use_facet<std::ctype<char>>(loc);
   facet.tolower(&val[0], &val[0] + val.length());
   return val;
@@ -131,7 +131,7 @@ struct IDLOptionsGdscript : public IDLOptions {
       : IDLOptions(opts) {}
 };
 
-class GdscriptGenerator : public BaseGenerator {
+class GdscriptGenerator final : public BaseGenerator {
 
  public:
   GdscriptGenerator(const Parser &parser, const std::string &path,
@@ -143,7 +143,7 @@ class GdscriptGenerator : public BaseGenerator {
 
     // FIXME change this to something line internal types or something. because there will be some builtins that are
     // able to be decoded and some that arent. so I'm not sure how things are going right now.
-    static const char *const builtin_types_[] = {
+    static constexpr char const *builtin_types_[] = {
         "String",
         "Vector3",
       "Vector3i",
@@ -152,7 +152,7 @@ class GdscriptGenerator : public BaseGenerator {
     };
     for (auto kw = builtin_types_; *kw; kw++) builtin_types.insert(*kw);
 
-    static const char *const keywords_[] = {
+    static const char *keywords_[] = {
       "if",
       "elif",
       "else",
@@ -210,12 +210,12 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "";
 
     include_map[parser_.root_struct_def_->file] = "";
-    for( const auto &include : parser_.GetIncludedFiles() ){
-      if( include.schema_name == "godot.fbs" ) continue;
-      auto include_name = ToLower( include.schema_name.substr(0, include.schema_name.length() -4) );
-      auto schema_path = include.filename.substr(0, include.filename.length() -4);
+    for( const auto &[schema_name, filename] : parser_.GetIncludedFiles() ){
+      if( schema_name == "godot.fbs" ) continue;
+      auto include_name = ToLower( schema_name.substr(0, schema_name.length() -4) );
+      auto schema_path = filename.substr(0, filename.length() -4);
       auto include_path = GeneratedFileName( schema_path, "", opts_);
-      include_map[include.filename] =  include_name + "_inc.";
+      include_map[filename] =  include_name + "_inc.";
       code_.SetValue( "INCLUDE_PATH", "res://" + include_path );
       code_.SetValue( "SCHEMA_NAME", include_name );
       code_ += "const {{SCHEMA_NAME}}_inc = preload('{{INCLUDE_PATH}}')";
@@ -278,7 +278,7 @@ class GdscriptGenerator : public BaseGenerator {
       and builtin_types.find( type.struct_def->name ) not_eq builtin_types.end();
   }
 
-  bool IsIncluded( const Type &type ){
+  bool IsIncluded( const Type &type ) const {
     return type.struct_def != nullptr
       and type.struct_def->file not_eq parser_.root_struct_def_->file;
   }
@@ -520,7 +520,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "#}";
 
     if( IsTable(type) and field.value.type.struct_def ) {
-      StructDef *struct_def = type.struct_def;
+      const StructDef *struct_def = type.struct_def;
 
       code_ += "#FieldDef.Value.Type.StructDef {";
 
@@ -582,7 +582,7 @@ class GdscriptGenerator : public BaseGenerator {
     }
   }
 
-  std::string GenFieldOffsetName(const FieldDef &field) {
+  std::string GenFieldOffsetName(const FieldDef &field) const {
     std::string uname = Name(field);
     std::transform(uname.begin(), uname.end(), uname.begin(), CharToUpper);
     return "VT_" + uname;
@@ -698,7 +698,7 @@ class GdscriptGenerator : public BaseGenerator {
   void GenStaticFactory( const StructDef &struct_def ){
     // The root struct has a convenience that the start defaults to zero,
     // and is decoded if zero
-    bool is_root = &struct_def == parser_.root_struct_def_;
+    const bool is_root = &struct_def == parser_.root_struct_def_;
     code_.SetValue( "DEFAULT", is_root ? "= 0" : "" );
     code_ += "static func Get{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
@@ -855,7 +855,7 @@ class GdscriptGenerator : public BaseGenerator {
           code_ += "var array_size = bytes.decode_u32( array_start )";
           code_ += "array_start += 4";
 
-          Type element = type.VectorType();
+          const Type element = type.VectorType();
           code_.SetValue("ELEMENT_TYPE", GetGodotType( element ) );
           code_.SetValue("ELEMENT_SIZE", element_size[ element.base_type ] );
           code_.SetValue("PBA", pba_types[ element.base_type ] );
@@ -1337,8 +1337,7 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb );";
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
       for( auto it = struct_def.fields.vec.rbegin(); it not_eq struct_def.fields.vec.rend(); ++it ) {
-        const auto &field = **it;
-        if( not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
+        if( const auto &field = **it; not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
           code_.SetValue("FIELD_NAME", Name( field ) );
           code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}} );";
         }
@@ -1359,8 +1358,7 @@ class GdscriptGenerator : public BaseGenerator {
     // All the non-inline objects need to be added to the builder before adding our object
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
       for( auto it = struct_def.fields.vec.rbegin(); it not_eq struct_def.fields.vec.rend(); ++it ) {
-        const auto &field = **it;
-        if( not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
+        if( const auto &field = **it; not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
 
           Type field_type = field.value.type;
           Type element_type;
@@ -1455,15 +1453,13 @@ class GdscriptGenerator : public BaseGenerator {
     code_ += "var builder = {{STRUCT_NAME}}Builder.new( _fbb )";
     for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2 ) {
       for( auto it = struct_def.fields.vec.rbegin(); it not_eq struct_def.fields.vec.rend(); ++it ) {
-        const auto &field = **it;
-        if( not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
+        if( const auto &field = **it; not field.deprecated and ( not struct_def.sortbysize or size == SizeOf(field.value.type.base_type) ) ){
 
           code_.SetValue("FIELD_NAME", Name( field ) );
-          Type field_type = field.value.type;
 
           // Scalar | Struct | Fixed length Array
           // These items are added inline in the table, and do not require creating an offset ahead of time.
-          if( IsScalar(field_type.base_type) or IsStruct( field_type ) ){
+          if( Type field_type = field.value.type; IsScalar(field_type.base_type) or IsStruct( field_type ) ){
             code_ += "builder.add_{{FIELD_NAME}}( object.{{FIELD_NAME}} )";
           } else {
             code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_offset )";
@@ -1482,17 +1478,17 @@ class GdscriptGenerator : public BaseGenerator {
 
 static bool GenerateGDScript(const Parser &parser, const std::string &path,
                  const std::string &file_name) {
-  gdscript::IDLOptionsGdscript opts(parser.opts);
+  const gdscript::IDLOptionsGdscript opts(parser.opts);
   gdscript::GdscriptGenerator generator(parser, path, file_name, opts);
   return generator.generate();
 }
 
 static std::string GDScriptMakeRule(const Parser &parser, const std::string &path,
                                const std::string &file_name) {
-  const auto file_base = StripPath(StripExtension(file_name));
-  gdscript::GdscriptGenerator generator(parser, path, file_name, parser.opts);
-  const auto included_files = parser.GetIncludedFilesRecursive(file_name);
-  std::string make_rule =
+  const auto                        file_base = StripPath(StripExtension(file_name));
+  const gdscript::GdscriptGenerator generator(parser, path, file_name, parser.opts);
+  const auto                        included_files = parser.GetIncludedFilesRecursive(file_name);
+  std::string                       make_rule      =
       generator.GeneratedFileName(path, file_base, parser.opts) + ": ";
   for (const std::string &included_file : included_files) {
     make_rule += " " + included_file;
@@ -1502,7 +1498,7 @@ static std::string GDScriptMakeRule(const Parser &parser, const std::string &pat
 
 namespace {
 
-class GdscriptCodeGenerator : public CodeGenerator {
+class GdscriptCodeGenerator final : public CodeGenerator {
  public:
   Status GenerateCode(const Parser &parser, const std::string &path,
                       const std::string &filename) override {
@@ -1512,7 +1508,7 @@ class GdscriptCodeGenerator : public CodeGenerator {
 
   // Generate code from the provided `buffer` of given `length`. The buffer is a
   // serialised reflection.fbs.
-  Status GenerateCode(const uint8_t *buffer, int64_t length, [[maybe_unused]]const CodeGenOptions &options) override {
+  Status GenerateCode(const uint8_t *buffer, const int64_t length, [[maybe_unused]]const CodeGenOptions &options) override {
     (void)buffer;
     (void)length;
     return Status::NOT_IMPLEMENTED;
