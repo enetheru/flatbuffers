@@ -284,9 +284,9 @@ class GdscriptGenerator final : public BaseGenerator {
 
     // convenience function to get the root table without having to pass its position
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
-    code_ += "static func GetRoot( data : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+    code_ += "static func GetRoot( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
     code_.IncrementIdentLevel();
-    code_ += "return Get{{ROOT_STRUCT}}( data )";
+    code_ += "return Get{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -760,7 +760,6 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "static func Get{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "if _bytes.is_empty(): return null";
-    if( is_root ) code_ += "if not _start: _start = _bytes.decode_u32(0)";
     code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
     code_ += "new_{{TABLE_NAME}}.start = _start";
     code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
