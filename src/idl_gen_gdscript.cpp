@@ -133,6 +133,13 @@ struct IDLOptionsGdscript : public IDLOptions {
 
 class GdscriptGenerator final : public BaseGenerator {
 
+  // MARK: Constructor
+  //
+  // ║  ___             _               _
+  // ║ / __|___ _ _  __| |_ _ _ _  _ __| |_ ___ _ _
+  // ║| (__/ _ \ ' \(_-<  _| '_| || / _|  _/ _ \ '_|
+  // ║ \___\___/_||_/__/\__|_|  \_,_\__|\__\___/_|
+  // ╙───────────────────────────────────────────────
  public:
   GdscriptGenerator(const Parser &parser, const std::string &path,
                const std::string &file_name, IDLOptionsGdscript opts)
@@ -253,6 +260,14 @@ class GdscriptGenerator final : public BaseGenerator {
     for (auto kw = my_keywords; *kw; kw++) keywords.insert(*kw);
 
   }
+
+  // MARK: Generate
+  //
+  // ║  ___                       _
+  // ║ / __|___ _ _  ___ _ _ __ _| |_ ___
+  // ║| (_ / -_) ' \/ -_) '_/ _` |  _/ -_)
+  // ║ \___\___|_||_\___|_| \__,_|\__\___|
+  // ╙─────────────────────────────────────
 
   // Iterate through all definitions we haven't. Generate code for (enums,
   // structs, and tables) and output them to a single file.
@@ -644,6 +659,13 @@ class GdscriptGenerator final : public BaseGenerator {
     std::transform(uname.begin(), uname.end(), uname.begin(), CharToUpper);
     return "VT_" + uname;
   }
+  // MARK: Gen Enum
+  //
+  // ║  ___            ___
+  // ║ / __|___ _ _   | __|_ _ _  _ _ __
+  // ║| (_ / -_) ' \  | _|| ' \ || | '  \
+  // ║ \___\___|_||_| |___|_||_\_,_|_|_|_|
+  // ╙─────────────────────────────────────
 
   // Generate an enum declaration
   void GenEnum(const EnumDef &enum_def) {
@@ -667,6 +689,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
     code_ += "}\n";
   }
+
+  // MARK: Gen Struct
+  //
+  // ║  ___            ___ _               _
+  // ║ / __|___ _ _   / __| |_ _ _ _  _ __| |_
+  // ║| (_ / -_) ' \  \__ \  _| '_| || / _|  _|
+  // ║ \___\___|_||_| |___/\__|_|  \_,_\__|\__|
+  // ╙──────────────────────────────────────────
 
   void GenStruct( const StructDef &struct_def ){
     // Generate class to access the structs fields
@@ -752,6 +782,15 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: Gen Static Factory
+  //
+  // ║  ___            ___ _        _   _      ___        _
+  // ║ / __|___ _ _   / __| |_ __ _| |_(_)__  | __|_ _ __| |_ ___ _ _ _  _
+  // ║| (_ / -_) ' \  \__ \  _/ _` |  _| / _| | _/ _` / _|  _/ _ \ '_| || |
+  // ║ \___\___|_||_| |___/\__\__,_|\__|_\__| |_|\__,_\__|\__\___/_|  \_, |
+  // ║                                                                |__/
+  // ╙──────────────────────────────────────────────────────────────────────
+
   void GenStaticFactory( const StructDef &struct_def ){
     // The root struct has a convenience that the start defaults to zero,
     // and is decoded if zero
@@ -768,6 +807,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.DecrementIdentLevel();
     code_ += "";
   }
+
+  // MARK: Gen VTable
+  //
+  // ║  ___           __   _______     _    _
+  // ║ / __|___ _ _   \ \ / /_   _|_ _| |__| |___
+  // ║| (_ / -_) ' \   \ V /  | |/ _` | '_ \ / -_)
+  // ║ \___\___|_||_|   \_/   |_|\__,_|_.__/_\___|
+  // ╙─────────────────────────────────────────────
 
   void GenVtableEnums( const StructDef &struct_def ){
     // Generate field id constants.
@@ -1059,6 +1106,15 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: Gen Debug
+  //
+  // ║  ___            ___      _
+  // ║ / __|___ _ _   |   \ ___| |__ _  _ __ _
+  // ║| (_ / -_) ' \  | |) / -_) '_ \ || / _` |
+  // ║ \___\___|_||_| |___/\___|_.__/\_,_\__, |
+  // ║                                   |___/
+  // ╙──────────────────────────────────────────
+
   void GenDebugDict( const StructDef &struct_def ){
     // There are only two options on how we got here
     // Either we are a table, or we are a struct.
@@ -1173,6 +1229,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: Gen Table
+  //
+  // ║  ___            _____     _    _
+  // ║ / __|___ _ _   |_   _|_ _| |__| |___
+  // ║| (_ / -_) ' \    | |/ _` | '_ \ / -_)
+  // ║ \___\___|_||_|   |_|\__,_|_.__/_\___|
+  // ╙───────────────────────────────────────
+
   // Generate an accessor struct
   void GenTable( const StructDef &struct_def ) {
     // Generate classes to access the table fields
@@ -1228,6 +1292,14 @@ class GdscriptGenerator final : public BaseGenerator {
     GenCreateFunc2( struct_def );
 
   }
+
+  // MARK: Gen Builder
+  //
+  // ║  ___            ___      _ _    _
+  // ║ / __|___ _ _   | _ )_  _(_) |__| |___ _ _
+  // ║| (_ / -_) ' \  | _ \ || | | / _` / -_) '_|
+  // ║ \___\___|_||_| |___/\_,_|_|_\__,_\___|_|
+  // ╙────────────────────────────────────────────
 
   void GenBuilders(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def ) );
@@ -1342,6 +1414,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: Gen Create
+  //
+  // ║  ___             ___              _
+  // ║ / __|___ _ _    / __|_ _ ___ __ _| |_ ___
+  // ║| (_ / -_) ' \  | (__| '_/ -_) _` |  _/ -_)
+  // ║ \___\___|_||_|  \___|_| \___\__,_|\__\___|
+  // ╙────────────────────────────────────────────
+
   void GenCreateFunc( const StructDef &struct_def ){
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
@@ -1402,6 +1482,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.DecrementIdentLevel();
     code_ += "";
   }
+
+  // MARK: Gen Create2
+  //
+  // ║  ___             ___              _       ___
+  // ║ / __|___ _ _    / __|_ _ ___ __ _| |_ ___|_  )
+  // ║| (_ / -_) ' \  | (__| '_/ -_) _` |  _/ -_)/ /
+  // ║ \___\___|_||_|  \___|_| \___\__,_|\__\___/___|
+  // ╙────────────────────────────────────────────────
 
   void GenCreateFunc2( const StructDef &struct_def ){
     // Generate a convenient CreateX function that uses the above builder
