@@ -2790,7 +2790,7 @@ bool Parser::SupportsAdvancedArrayFeatures() const {
           ~(IDLOptions::kCpp | IDLOptions::kPython | IDLOptions::kJava |
             IDLOptions::kCSharp | IDLOptions::kJsonSchema | IDLOptions::kJson |
             IDLOptions::kBinary | IDLOptions::kRust | IDLOptions::kTs |
-            IDLOptions::kSwift)) == 0;
+            IDLOptions::kGDScript)) == 0;
 }
 
 bool Parser::Supports64BitOffsets() const {
