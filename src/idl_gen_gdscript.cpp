@@ -1573,13 +1573,13 @@ class GdscriptCodeGenerator final : public CodeGenerator {
                           const std::string &filename,
                           std::string &output) override {
     output = GDScriptMakeRule(parser, path, filename);
-    return Status::OK;
+    return Status::NOT_IMPLEMENTED;
   }
 
   Status GenerateGrpcCode([[maybe_unused]]const Parser &parser, [[maybe_unused]]const std::string &path,
                           [[maybe_unused]]const std::string &filename) override {
     //FIXME if ( not GenerateGdscriptGRPC(parser, path, filename)) { return Status::ERROR; }
-    return Status::OK;
+    return Status::NOT_IMPLEMENTED;
   }
 
   Status GenerateRootFile(const Parser &parser,
@@ -1595,7 +1595,7 @@ class GdscriptCodeGenerator final : public CodeGenerator {
 
   [[nodiscard]] bool SupportsRootFileGeneration() const override { return false; }
 
-  [[nodiscard]] IDLOptions::Language Language() const override { return IDLOptions::kCpp; }
+  [[nodiscard]] IDLOptions::Language Language() const override { return IDLOptions::kGDScript; }
 
   [[nodiscard]] std::string LanguageName() const override { return "GDScript"; }
 };
