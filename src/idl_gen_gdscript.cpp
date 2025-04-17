@@ -654,11 +654,6 @@ class GdscriptGenerator final : public BaseGenerator {
     }
   }
 
-  std::string GenFieldOffsetName(const FieldDef &field) const {
-    std::string uname = Name(field);
-    std::transform(uname.begin(), uname.end(), uname.begin(), CharToUpper);
-    return "VT_" + uname;
-  }
   // MARK: Gen Enum
   //
   // ║  ___            ___
@@ -831,7 +826,7 @@ class GdscriptGenerator final : public BaseGenerator {
           // Deprecated fields won't be accessible.
           continue;
         }
-        code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+        code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
         code_.SetValue("OFFSET_VALUE", NumToString(field->value.offset));
         if( sep ) code_ += "{{SEP}}";
         code_ += "{{OFFSET_NAME}} = {{OFFSET_VALUE}}\\";
@@ -852,7 +847,7 @@ class GdscriptGenerator final : public BaseGenerator {
       // Required fields are always accessible.
       code_ += "# {{FIELD_NAME}} is required\n";
     }
-    code_.SetValue("OFFSET_NAME", GenFieldOffsetName(field));
+    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field),Case::kAllUpper ));
     code_ += "func {{FIELD_NAME}}_is_present() -> bool:";
     code_.IncrementIdentLevel();
     code_ += "return get_field_offset( vtable.{{OFFSET_NAME}} )";
@@ -1156,7 +1151,7 @@ class GdscriptGenerator final : public BaseGenerator {
         code_.SetValue( "ELEMENT_TYPE", TypeName( field_type.element ) );
       }
 
-      code_.SetValue("OFFSET_NAME", GenFieldOffsetName( *field ) );
+      code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
 
       code_ += "# {{FIELD_NAME}}:{{FIELD_TYPE}} \\";
       code_ += field->IsRequired() ? "(required)" : "";
@@ -1275,7 +1270,7 @@ class GdscriptGenerator final : public BaseGenerator {
           // Deprecated fields won't be accessible.
           continue;
         }
-        code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+        code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
         GenPresenceFunc(*field);
         GenAccessFunc(*field);
       }
@@ -1335,7 +1330,7 @@ class GdscriptGenerator final : public BaseGenerator {
 
       code_.SetValue("FIELD_NAME", Name( *field ) );
       code_.SetValue("INCLUDE", "" );
-      code_.SetValue("FIELD_OFFSET", GenFieldOffsetName( *field ) );
+      code_.SetValue("FIELD_OFFSET", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
       code_.SetValue("PARAM_NAME", Name( *field ) + (is_inline ? "": "_offset") );
       code_.SetValue("INCLUDE", IsStruct( type ) ? include_map[type.struct_def->file] : "" );
       code_.SetValue("PARAM_TYPE", is_inline ? GetGodotType( type ) : "int" );
@@ -1402,7 +1397,7 @@ class GdscriptGenerator final : public BaseGenerator {
     for (const auto &field : struct_def.fields.vec) {
       if( not field->deprecated and field->IsRequired() ){
         code_.SetValue("FIELD_NAME", Name(*field));
-        code_.SetValue("OFFSET_NAME", GenFieldOffsetName(*field));
+        code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
         code_ += "fbb_.Required(o, {{STRUCT_NAME}}.vtable.{{OFFSET_NAME}});";
       }
     }
