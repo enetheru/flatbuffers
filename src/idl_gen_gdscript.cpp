@@ -128,7 +128,9 @@ struct IDLOptionsGdscript : public IDLOptions {
   // All fields start with 'g_' prefix to distinguish from the base IDLOptions.
 
   IDLOptionsGdscript(const IDLOptions &opts) // NOLINT(*-explicit-constructor)
-      : IDLOptions(opts) {}
+      : IDLOptions(opts) {
+    filename_suffix ="_gen";
+  }
 };
 
 class GdscriptGenerator final : public BaseGenerator {
