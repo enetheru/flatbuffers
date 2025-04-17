@@ -275,26 +275,27 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.Clear();
     const auto file_path = GeneratedFileName(path_, file_name_, opts_);
 
-    code_.SetValue( "FILE_NAME", file_name_ + "_generated.gd" );
+    code_.SetValue( "FILE_NAME", file_name_ + "_gen.gd" );
     code_.SetValue( "FILE_PATH", "res://" + file_path );
 
     code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_ += "";
 
+
+    // Include Files
     include_map[parser_.root_struct_def_->file] = "";
     for( const auto &[schema_name, filename] : parser_.GetIncludedFiles() ){
       if( schema_name == "godot.fbs" ) continue;
       auto include_name = ToLower( schema_name.substr(0, schema_name.length() -4) );
       auto schema_path = filename.substr(0, filename.length() -4);
       auto include_path = GeneratedFileName( schema_path, "", opts_);
-      include_map[filename] =  include_name + "_inc.";
+
+      include_map[filename] =  include_name + ".";
+      //FIXME I'm thinking of re-workin this, so for now I will comment it out.
       code_.SetValue( "INCLUDE_PATH", "res://" + include_path );
       code_.SetValue( "SCHEMA_NAME", include_name );
-      code_ += "const {{SCHEMA_NAME}}_inc = preload('{{INCLUDE_PATH}}')";
+      code_ += "# const {{SCHEMA_NAME}} = preload('{{INCLUDE_PATH}}')";
       code_ += "";
-//      const inc_sectorlink = preload('res://flatbuffers/SectorLink_generated.gd')
-//      # addons/gdflatbuffers/godot.fbs
-//      # flatbuffers/SectorLink.fbs
     }
 
     // convenience function to get the root table without having to pass its position
@@ -1250,17 +1251,20 @@ class GdscriptGenerator final : public BaseGenerator {
     { // generate Flatbuffer derived class
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
       code_.IncrementIdentLevel();
-      code_ += "static var parent : GDScript";
-      code_ += "";
+
+      // FIXME this parent workaround needs to be resolved
+      // code_ += "static var parent : GDScript";
+      // code_ += "";
 
       GenVtableEnums(struct_def);
 
-      code_ += "func _init() -> void:";
-      code_.IncrementIdentLevel();
-      code_ += "if not parent:";
-      code_ += "\tparent = load( '{{FILE_PATH}}' )";
-      code_.DecrementIdentLevel();
-      code_ += "";
+      // FIXME parent scope workaround needs to be changed.
+      // code_ += "func _init() -> void:";
+      // code_.IncrementIdentLevel();
+      // code_ += "if not parent:";
+      // code_ += "\tparent = load( '{{FILE_PATH}}' )";
+      // code_.DecrementIdentLevel();
+      // code_ += "";
 
       // Generate the accessors.
       for (const FieldDef *field : struct_def.fields.vec) {
@@ -1275,7 +1279,8 @@ class GdscriptGenerator final : public BaseGenerator {
         GenAccessFunc(*field);
       }
 
-      GenDebugDict(struct_def);
+      // FIXME Hide this behind a cmd line option
+      // GenDebugDict(struct_def);
 
       code_.DecrementIdentLevel();
       code_ += "";
@@ -1283,8 +1288,9 @@ class GdscriptGenerator final : public BaseGenerator {
 
     GenBuilders(struct_def);
 
+    // FIXME put creation functions behind cmd line option
     GenCreateFunc( struct_def );
-    GenCreateFunc2( struct_def );
+    // GenCreateFunc2( struct_def );
 
   }
 
