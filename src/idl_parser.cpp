@@ -952,7 +952,7 @@ CheckedError Parser::ParseField(StructDef &struct_def) {
     Type union_type(type.enum_def->underlying_type);
     union_type.base_type = BASE_TYPE_UTYPE;
     ECHECK(AddField(struct_def, name + UnionTypeFieldSuffix(),union_type, &typefield));
-    
+
   } else if (IsVector(type) && type.element == BASE_TYPE_UNION) {
     advanced_features_ |= reflection::AdvancedUnionFeatures;
     // Only cpp, js and ts supports the union vector feature so far.
@@ -2514,7 +2514,7 @@ CheckedError Parser::ParseEnum(const bool is_union, EnumDef **dest,
       if (!IsInteger(enum_def->underlying_type.base_type) || IsBool(enum_def->underlying_type.base_type)) {
         return Error("underlying " + std::string(is_union ? "union" : "enum") + "type must be integral");
       }
-        
+
       // Make this type refer back to the enum it was derived from.
       enum_def->underlying_type.enum_def = enum_def;
     }
@@ -2682,8 +2682,7 @@ bool Parser::SupportsOptionalScalars(const flatbuffers::IDLOptions &opts) {
       IDLOptions::kKotlin | IDLOptions::kKotlinKmp | IDLOptions::kCpp |
       IDLOptions::kJava | IDLOptions::kCSharp | IDLOptions::kTs |
       IDLOptions::kBinary | IDLOptions::kGo | IDLOptions::kPython |
-      IDLOptions::kJson |
-      IDLOptions::kNim;
+      IDLOptions::kJson | IDLOptions::kGDScript | IDLOptions::kNim;
   unsigned long langs = opts.lang_to_generate;
   return (langs > 0 && langs < IDLOptions::kMAX) && !(langs & ~supported_langs);
 }
@@ -2694,7 +2693,8 @@ bool Parser::SupportsOptionalScalars() const {
 
 bool Parser::SupportsDefaultVectorsAndStrings() const {
   static FLATBUFFERS_CONSTEXPR unsigned long supported_langs =
-      IDLOptions::kRust | IDLOptions::kSwift | IDLOptions::kNim;
+      IDLOptions::kRust | IDLOptions::kSwift | IDLOptions::kNim |
+      IDLOptions::kGDScript;
   return !(opts.lang_to_generate & ~supported_langs);
 }
 
@@ -2703,7 +2703,8 @@ bool Parser::SupportsAdvancedUnionFeatures() const {
           ~(IDLOptions::kCpp | IDLOptions::kTs | IDLOptions::kPhp |
             IDLOptions::kJava | IDLOptions::kCSharp | IDLOptions::kKotlin |
             IDLOptions::kBinary | IDLOptions::kSwift | IDLOptions::kNim |
-            IDLOptions::kJson | IDLOptions::kKotlinKmp)) == 0;
+            IDLOptions::kJson | IDLOptions::kKotlinKmp |
+            IDLOptions::kGDScript)) == 0;
 }
 
 bool Parser::SupportsAdvancedArrayFeatures() const {
