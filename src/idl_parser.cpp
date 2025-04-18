@@ -2717,12 +2717,13 @@ bool Parser::SupportsAdvancedArrayFeatures() const {
 
 bool Parser::Supports64BitOffsets() const {
   return (opts.lang_to_generate &
-          ~(IDLOptions::kCpp | IDLOptions::kJson | IDLOptions::kBinary)) == 0;
+          ~(IDLOptions::kCpp | IDLOptions::kJson | IDLOptions::kBinary |
+            IDLOptions::kGDScript)) == 0;
 }
 
 bool Parser::SupportsUnionUnderlyingType() const {
     return (opts.lang_to_generate & ~(IDLOptions::kCpp | IDLOptions::kTs |
-         IDLOptions::kBinary)) == 0;
+         IDLOptions::kBinary | IDLOptions::kGDScript)) == 0;
 }
 
 Namespace *Parser::UniqueNamespace(Namespace *ns) {
