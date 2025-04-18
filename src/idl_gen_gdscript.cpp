@@ -143,10 +143,8 @@ class GdscriptGenerator final : public BaseGenerator {
   // ║ \___\___/_||_/__/\__|_|  \_,_\__|\__\___/_|
   // ╙───────────────────────────────────────────────
  public:
-  GdscriptGenerator(const Parser &parser, const std::string &path,
-               const std::string &file_name, IDLOptionsGdscript opts)
-      : BaseGenerator(parser, path, file_name, "", "::", "gd"),
-        opts_(std::move(opts))
+  GdscriptGenerator( const Parser &parser, const std::string &path, const std::string &file_name, IDLOptionsGdscript opts )
+      : BaseGenerator( parser, path, file_name, "","::","gd" ), opts_(std::move(opts) )
   {
     code_.SetPadding("\t");
 
@@ -1623,7 +1621,7 @@ class GdscriptGenerator final : public BaseGenerator {
 }  // namespace gdscript
 
 static bool GenerateGDScript(const Parser &parser, const std::string &path,
-                 const std::string &file_name) {
+                             const std::string &file_name){
   const gdscript::IDLOptionsGdscript opts(parser.opts);
   gdscript::GdscriptGenerator generator(parser, path, file_name, opts);
   return generator.generate();
