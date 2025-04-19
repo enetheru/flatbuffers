@@ -22,14 +22,6 @@ static std::string ToUpper(std::string val) {
   return val;
 }
 
-// Make the string lower case
-static std::string ToLower(std::string val) {
-  const std::locale loc;
-  auto &facet = std::use_facet<std::ctype<char>>(loc);
-  facet.tolower(&val[0], &val[0] + val.length());
-  return val;
-}
-
 namespace gdscript {
 
 // FIXME Consolidate the naming across the project
@@ -129,7 +121,17 @@ struct IDLOptionsGdscript : public IDLOptions {
 
   IDLOptionsGdscript(const IDLOptions &opts) // NOLINT(*-explicit-constructor)
       : IDLOptions(opts) {
-    filename_suffix ="_gen";
+    //TODO Possible future options to respect
+    // generate_object_based_api = false;
+    // object_prefix = "";
+    // object_suffix = "";
+    // include_prefix = "";
+    // keep_prefix = false;
+    // root_type = "";
+    // std::string filename_suffix;
+    // std::string filename_extension;
+    // std::string project_root;
+
   }
 };
 
@@ -275,9 +277,6 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.Clear();
     const auto file_path = GeneratedFileName(path_, file_name_, opts_);
 
-    code_.SetValue( "FILE_NAME", file_name_ + "_gen.gd" );
-    code_.SetValue( "FILE_PATH", "res://" + file_path );
-
     code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_ += "";
 
@@ -286,15 +285,27 @@ class GdscriptGenerator final : public BaseGenerator {
     include_map[parser_.root_struct_def_->file] = "";
     for( const auto &[schema_name, filename] : parser_.GetIncludedFiles() ){
       if( schema_name == "godot.fbs" ) continue;
-      auto include_name = ToLower( schema_name.substr(0, schema_name.length() -4) );
-      auto schema_path = filename.substr(0, filename.length() -4);
-      auto include_path = GeneratedFileName( schema_path, "", opts_);
+      // Included files are in the form:
+      // const <identifier> = preload("<path>")
 
-      include_map[filename] =  include_name + ".";
+      //FIXME IT's currently generating:
+      //const AAChangeList = preload('res://changes/AA_ChangeList_generated.gd')
+
+      // make the identifier CamelCase
+      auto schema_file = StripPath(schema_name);
+      auto schema_ident = ConvertCase(StripExtension(schema_file), Case::kUpperCamel);
+      code_.SetValue( "SCHEMA_IDENT", schema_ident );
+
+      // get the relative path of the included schema
+      auto schema_path_abs = GeneratedFileName( StripExtension(schema_name),"", opts_);
+      auto schema_path = FilePath(parser_.opts.project_root, schema_path_abs, false);
+      code_.SetValue( "SCHEMA_PATH", "res://" + schema_path_abs );
+
+      // add to the include map for later use
+      include_map[filename] =  schema_ident;
       //FIXME I'm thinking of re-workin this, so for now I will comment it out.
-      code_.SetValue( "INCLUDE_PATH", "res://" + include_path );
-      code_.SetValue( "SCHEMA_NAME", include_name );
-      code_ += "# const {{SCHEMA_NAME}} = preload('{{INCLUDE_PATH}}')";
+
+      code_ += "const {{SCHEMA_IDENT}} = preload('{{SCHEMA_PATH}}')";
       code_ += "";
     }
 
@@ -655,13 +666,14 @@ class GdscriptGenerator final : public BaseGenerator {
     }
   }
 
-  // MARK: Gen Enum
-  //
-  // ║  ___            ___
-  // ║ / __|___ _ _   | __|_ _ _  _ _ __
-  // ║| (_ / -_) ' \  | _|| ' \ || | '  \
-  // ║ \___\___|_||_| |___|_||_\_,_|_|_|_|
-  // ╙─────────────────────────────────────
+  /* MARK: Gen Enum
+   *
+   * ║  ___            ___
+   * ║ / __|___ _ _   | __|_ _ _  _ _ __
+   * ║| (_ / -_) ' \  | _|| ' \ || | '  \
+   * ║ \___\___|_||_| |___|_||_\_,_|_|_|_|
+   * ╙─────────────────────────────────────
+   */
 
   // Generate an enum declaration
   void GenEnum(const EnumDef &enum_def) {
@@ -1620,61 +1632,60 @@ class GdscriptGenerator final : public BaseGenerator {
 
 }  // namespace gdscript
 
-static bool GenerateGDScript(const Parser &parser, const std::string &path,
-                             const std::string &file_name){
+static bool GenerateGDScript(const Parser &parser,
+                             const std::string &path,
+                             const std::string &file_name) {
   const gdscript::IDLOptionsGdscript opts(parser.opts);
   gdscript::GdscriptGenerator generator(parser, path, file_name, opts);
   return generator.generate();
 }
 
-static std::string GDScriptMakeRule(const Parser &parser, const std::string &path,
-                               const std::string &file_name) {
-  const auto                        file_base = StripPath(StripExtension(file_name));
-  const gdscript::GdscriptGenerator generator(parser, path, file_name, parser.opts);
-  const auto                        included_files = parser.GetIncludedFilesRecursive(file_name);
-  std::string                       make_rule      =
-      generator.GeneratedFileName(path, file_base, parser.opts) + ": ";
-  for (const std::string &included_file : included_files) {
-    make_rule += " " + included_file;
-  }
-  return make_rule;
-}
-
 namespace {
 
-class GdscriptCodeGenerator final : public CodeGenerator {
+class GdscriptCodeGenerator final : public CodeGenerator
+{
  public:
-  Status GenerateCode(const Parser &parser, const std::string &path,
-                      const std::string &filename) override {
-    if(  not GenerateGDScript(parser, path, filename) ){ return Status::ERROR; }
+  Status GenerateCode(const Parser &parser,
+                      const std::string &path,
+                      const std::string &filename) override
+  {
+    if( not GenerateGDScript(parser, path, filename) ){
+      return Status::ERROR;
+    }
     return Status::OK;
   }
 
   // Generate code from the provided `buffer` of given `length`. The buffer is a
   // serialised reflection.fbs.
-  Status GenerateCode(const uint8_t *buffer, const int64_t length, [[maybe_unused]]const CodeGenOptions &options) override {
-    (void)buffer;
-    (void)length;
+  Status GenerateCode(
+      [[maybe_unused]] const uint8_t *buffer,
+      [[maybe_unused]] const int64_t length,
+      [[maybe_unused]] const CodeGenOptions &options) override
+  {
     return Status::NOT_IMPLEMENTED;
   }
 
-  Status GenerateMakeRule(const Parser &parser, const std::string &path,
-                          const std::string &filename,
-                          std::string &output) override {
-    output = GDScriptMakeRule(parser, path, filename);
+  Status GenerateMakeRule(
+      [[maybe_unused]] const Parser &parser,
+      [[maybe_unused]] const std::string &path,
+      [[maybe_unused]] const std::string &filename,
+      [[maybe_unused]] std::string &output) override
+  {
     return Status::NOT_IMPLEMENTED;
   }
 
-  Status GenerateGrpcCode([[maybe_unused]]const Parser &parser, [[maybe_unused]]const std::string &path,
-                          [[maybe_unused]]const std::string &filename) override {
-    //FIXME if ( not GenerateGdscriptGRPC(parser, path, filename)) { return Status::ERROR; }
+  Status GenerateGrpcCode(
+      [[maybe_unused]] const Parser &parser,
+      [[maybe_unused]] const std::string &path,
+      [[maybe_unused]] const std::string &filename) override
+  {
     return Status::NOT_IMPLEMENTED;
   }
 
-  Status GenerateRootFile(const Parser &parser,
-                          const std::string &path) override {
-    (void)parser;
-    (void)path;
+  Status GenerateRootFile(
+      [[maybe_unused]] const Parser &parser,
+      [[maybe_unused]] const std::string &path) override
+  {
     return Status::NOT_IMPLEMENTED;
   }
 
