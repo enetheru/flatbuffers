@@ -150,7 +150,7 @@ class GdscriptGenerator final : public BaseGenerator {
     // float,
     // String
 
-    static constexpr char const *godot_structs[] = {
+    static constexpr const char *godot_structs[] = {
       "Vector2",
       "Vector2i",
       "Rect2",
@@ -170,14 +170,14 @@ class GdscriptGenerator final : public BaseGenerator {
       nullptr
     };
 
-    static constexpr char const *godot_stringlike[] = {
+    static constexpr const char *godot_stringlike[] = {
       "String",
       "StringName",
       "NodePath",
       nullptr
     };
 
-    static constexpr char const *godot_composite[] = {
+    static constexpr const char *godot_composite[] = {
       "Rid",
       "Object",
       "Callable",
@@ -186,7 +186,7 @@ class GdscriptGenerator final : public BaseGenerator {
       nullptr
     };
 
-    static constexpr char const *godot_arraylike[] = {
+    static constexpr const char *godot_arraylike[] = {
       "Array",
       "packed_byte_array",
       "packed_int32_array",
@@ -202,7 +202,7 @@ class GdscriptGenerator final : public BaseGenerator {
     };
     for (auto kw = godot_structs; *kw; kw++) builtin_structs.insert(*kw);
 
-    static constexpr char const *gdscript_keywords[] = {
+    static constexpr const char *gdscript_keywords[] = {
       "if",
       "elif",
       "else",
@@ -239,7 +239,7 @@ class GdscriptGenerator final : public BaseGenerator {
       nullptr,
     };
 
-    static constexpr char const *my_keywords[] = {
+    static constexpr const char *my_keywords[] = {
       "bytes",
       "start",
       nullptr
@@ -292,7 +292,6 @@ class GdscriptGenerator final : public BaseGenerator {
 
       // get the relative path of the included schema
       auto schema_path_abs = GeneratedFileName( StripExtension(schema_name),"", opts_);
-      auto schema_path = FilePath(parser_.opts.project_root, schema_path_abs, false);
       code_.SetValue( "SCHEMA_PATH", "res://" + schema_path_abs );
       code_ += "const {{SCHEMA_IDENT}} = preload('{{SCHEMA_PATH}}')";
 
@@ -320,9 +319,9 @@ class GdscriptGenerator final : public BaseGenerator {
       code_.SetValue( "INCLUDE_IDENT", "" );
     }
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
-    code_ += "static func GetRoot( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+    code_ += "static func get_root( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
     code_.IncrementIdentLevel();
-    code_ += "return {{INCLUDE_IDENT}}Get{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
+    code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -422,49 +421,32 @@ class GdscriptGenerator final : public BaseGenerator {
   std::string Name(const EnumVal &ev) const { return EscapeKeyword(ev.name); }
 
   std::string GetGodotType( const Type &type ){
-    if( IsBool(type.base_type ) ){
-      return "bool";
+    if (IsBool(type.base_type)) { return "bool"; }
+    if (IsEnum(type)) { return EscapeKeyword(type.enum_def->name); }
+    if (IsInteger(type.base_type)) { return "int"; }
+    if (IsFloat(type.base_type)) { return "float"; }
+    if (IsString(type)) { return "String"; }
+    if (IsStruct(type) or IsTable(type)) {
+      if (IsBuiltin(type)) { return type.struct_def->name; }
+      return EscapeKeyword(type.struct_def->name);
     }
-    else if( IsEnum(type) ){
-      return EscapeKeyword( type.enum_def->name );
-    }
-    else if( IsInteger(type.base_type) ){
-      return "int";
-    }
-    else if( IsFloat(type.base_type) ){
-      return "float";
-    }
-    else if( IsString( type ) ){
-      return "String";
-    }
-    else if( IsStruct( type ) or IsTable( type ) ){
-      if( IsBuiltin( type ) ) {
-        return type.struct_def->name;
-      } else {
-        return EscapeKeyword( type.struct_def->name );
-      }
-    }
-    else if( IsSeries( type ) ){
-      if( IsScalar(type.element) ){
-        switch( type.element ){
+    if (IsSeries(type)) {
+      if (IsScalar(type.element)) {
+        switch (type.element) {
           case BASE_TYPE_UCHAR: return "PackedByteArray";
           case BASE_TYPE_INT: return "PackedInt32Array";
           case BASE_TYPE_LONG: return "PackedInt64Array";
           case BASE_TYPE_FLOAT: return "PackedFloat32Array";
           case BASE_TYPE_DOUBLE: return "PackedFloat64Array";
-          default:break;
+          default: break;
         }
-      } else if( IsString( type.VectorType() ) ){
+      } else if (IsString(type.VectorType())) {
         return "PackedStringArray";
       }
       return "Array";
     }
-    else if( IsUnion( type ) ){
-      return "Variant";
-    }
-    else{
-      return "TODO";
-    }
+    if (IsUnion(type)) { return "Variant"; }
+    return "_TODO_";
   }
 
   void GenComment(const std::vector<std::string> &dc, const char *prefix_ = "#") {
@@ -725,7 +707,7 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
-    code_ += "static func Get{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int ):";
+    code_ += "static func get_{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int ):";
     code_.IncrementIdentLevel();
     code_ += "return {{STRUCT_NAME}}.new( _bytes, _start )";
     code_.DecrementIdentLevel();
@@ -780,13 +762,13 @@ class GdscriptGenerator final : public BaseGenerator {
         code_.SetValue("STRUCT_NAME", Name( struct_def ) );
         code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ):";
         code_.IncrementIdentLevel();
-        code_ += "var parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
-        code_ += "parent.Get{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "var parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
         code_.DecrementIdentLevel();
         code_ += "";
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return parent.Get{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_ += "return parent.get_{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
         code_.DecrementIdentLevel();
         code_ += "";
       }
@@ -814,7 +796,7 @@ class GdscriptGenerator final : public BaseGenerator {
     // and is decoded if zero
     const bool is_root = &struct_def == parser_.root_struct_def_;
     code_.SetValue( "DEFAULT", is_root ? "= 0" : "" );
-    code_ += "static func Get{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
+    code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "if _bytes.is_empty(): return null";
     code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
@@ -900,12 +882,12 @@ class GdscriptGenerator final : public BaseGenerator {
             // Struct
           else if( IsStruct( type ) ) {
             if( IsBuiltin( type ) ) {
-              code_ += "return Get{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
+              code_ += "return get_{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
             } else {
               code_.SetValue( "INCLUDE",  GetInclude(type) );
               code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
               code_ += "if not field_offset: return null";
-              code_ += "return {{INCLUDE}}Get{{GODOT_TYPE}}( bytes, start + field_offset )";
+              code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, start + field_offset )";
             }
           }
             // Table
@@ -916,7 +898,7 @@ class GdscriptGenerator final : public BaseGenerator {
             if( IsBuiltin( type ) ) {
               code_ += "return decode_{{GODOT_TYPE}}( field_start )";
             } else {
-              code_ += "return {{INCLUDE}}Get{{GODOT_TYPE}}( bytes, field_start )";
+              code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
             }
           }
             // Union
@@ -937,7 +919,7 @@ class GdscriptGenerator final : public BaseGenerator {
               if( IsBuiltin( type ) ) {
                 code_ += "return decode_{{GODOT_TYPE}}( field_start )";
               } else {
-                code_ += "return {{INCLUDE}}Get{{GODOT_TYPE}}( bytes, field_start )";
+                code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
               }
               code_.DecrementIdentLevel();
             }
@@ -1068,7 +1050,7 @@ class GdscriptGenerator final : public BaseGenerator {
             if( IsBuiltin( element ) ) {
               code_ += "array[i] = decode_{{ELEMENT_TYPE}}( pos + bytes.decode_u32( pos ) )";
             } else {
-              code_ += "array[i] = {{INCLUDE}}Get{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
+              code_ += "array[i] = {{INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
             }
 
             code_.DecrementIdentLevel();
@@ -1449,7 +1431,7 @@ class GdscriptGenerator final : public BaseGenerator {
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
 
-    code_ += "static func Create{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
+    code_ += "static func create_{{STRUCT_NAME}}( _fbb : FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
     code_.SetValue("SEP", "," );
@@ -1518,7 +1500,7 @@ class GdscriptGenerator final : public BaseGenerator {
     // Generate a convenient CreateX function that uses the above builder
     // to create a table in one go.
 
-    code_ += "static func Create{{STRUCT_NAME}}2( _fbb : FlatBufferBuilder, object : Variant ) -> int:";
+    code_ += "static func create_{{STRUCT_NAME}}2( _fbb : FlatBufferBuilder, object : Variant ) -> int:";
     code_.IncrementIdentLevel();
 
     // All the non-inline objects need to be added to the builder before adding our object
