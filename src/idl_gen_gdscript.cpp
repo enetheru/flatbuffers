@@ -14,14 +14,6 @@
 
 namespace flatbuffers {
 
-// Make the string upper case
-static std::string ToUpper(std::string val) {
-  const std::locale loc;
-  auto &facet = std::use_facet<std::ctype<char>>(loc);
-  facet.toupper(&val[0], &val[0] + val.length());
-  return val;
-}
-
 namespace gdscript {
 
 // FIXME Consolidate the naming across the project
@@ -685,11 +677,12 @@ class GdscriptGenerator final : public BaseGenerator {
 
     code_.SetValue("SEP", ",");
     auto add_sep = false;
-    for (const auto ev : enum_def.Vals()) {
+    for (const auto enum_val : enum_def.Vals()) {
       if (add_sep) code_ += "{{SEP}}";
-      GenComment(ev->doc_comment );
-      code_.SetValue("KEY",  ToUpper(Name(*ev)) );
-      code_.SetValue("VALUE", enum_def.ToString(*ev) );
+      GenComment(enum_val->doc_comment );
+      auto key = ConvertCase( Name(*enum_val), Case::kAllUpper );
+      code_.SetValue("KEY",  key );
+      code_.SetValue("VALUE", enum_def.ToString(*enum_val) );
       code_ += "{{KEY}} = {{VALUE}}\\";
       add_sep = true;
     }
@@ -920,7 +913,7 @@ class GdscriptGenerator final : public BaseGenerator {
             code_.SetValue( "ENUM_TYPE", type.enum_def->name );
             for( const auto &val: type.enum_def->Vals() ) {
               if( val->IsZero() )continue;
-              code_.SetValue( "ENUM_VALUE", ToUpper( val->name ) );
+              code_.SetValue( "ENUM_VALUE", ConvertCase(val->name, Case::kAllUpper) );
               code_.SetValue( "GODOT_TYPE", GetGodotType( val->union_type ) );
               code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
               code_.IncrementIdentLevel();
