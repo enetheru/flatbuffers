@@ -272,10 +272,9 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_ += "";
 
-
     // Include Files
     include_map[parser_.root_struct_def_->file] = "";
-    for( const auto &[schema_name, filename] : parser_.GetIncludedFiles() ){
+    for( const auto &[schema_name, include_file] : parser_.GetIncludedFiles() ){
       if( schema_name == "godot.fbs" ) continue;
       // Included files are in the form:
       // const <identifier> = preload("<path>")
@@ -288,24 +287,42 @@ class GdscriptGenerator final : public BaseGenerator {
       auto schema_ident = ConvertCase(StripExtension(schema_file), Case::kUpperCamel);
       code_.SetValue( "SCHEMA_IDENT", schema_ident );
 
+      // add to the include map for later use
+      include_map[include_file] =  schema_ident;
+
       // get the relative path of the included schema
       auto schema_path_abs = GeneratedFileName( StripExtension(schema_name),"", opts_);
       auto schema_path = FilePath(parser_.opts.project_root, schema_path_abs, false);
       code_.SetValue( "SCHEMA_PATH", "res://" + schema_path_abs );
-
-      // add to the include map for later use
-      include_map[filename] =  schema_ident;
-      //FIXME I'm thinking of re-workin this, so for now I will comment it out.
-
       code_ += "const {{SCHEMA_IDENT}} = preload('{{SCHEMA_PATH}}')";
+
+      // Add the enums from the included files as const values
+      for ( const auto &[enum_ident, enum_def] :  parser_.enums_.dict ) {
+        if (const auto &enum_file = enum_def->file; enum_file != include_file ) continue;
+        code_.SetValue( "ENUM_IDENT", enum_ident);
+        code_ += "const {{ENUM_IDENT}} = {{SCHEMA_IDENT}}.{{ENUM_IDENT}}";
+      }
+      // Add the structs and tables from the included files as const values
+      for ( const auto &[struct_ident, struct_def] :  parser_.structs_.dict ) {
+        if (const auto &struct_file = struct_def->file; struct_file != include_file ) continue;
+        code_.SetValue( "STRUCT_IDENT", struct_ident);
+          code_ += "const {{STRUCT_IDENT}} = {{SCHEMA_IDENT}}.{{STRUCT_IDENT}}";
+      }
       code_ += "";
     }
 
+    // Gen GetRoot convenience function
     // convenience function to get the root table without having to pass its position
+    if (const auto &include_ident = include_map[parser_.root_struct_def_->file];
+        include_ident.length() > 0 ) {
+      code_.SetValue( "INCLUDE_IDENT", include_ident + "." );
+    } else {
+      code_.SetValue( "INCLUDE_IDENT", "" );
+    }
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
     code_ += "static func GetRoot( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
     code_.IncrementIdentLevel();
-    code_ += "return Get{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
+    code_ += "return {{INCLUDE_IDENT}}Get{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
     code_.DecrementIdentLevel();
     code_ += "";
 
