@@ -134,7 +134,7 @@ class GdscriptGenerator final : public BaseGenerator {
   // ║  ___             _               _
   // ║ / __|___ _ _  __| |_ _ _ _  _ __| |_ ___ _ _
   // ║| (__/ _ \ ' \(_-<  _| '_| || / _|  _/ _ \ '_|
-  // ║ \___\___/_||_/__/\__|_|  \_,_\__|\__\___/_|
+  // ║ \___\___|_||_/__/\__|_|  \_,_\__|\__\___/_|
   // ╙───────────────────────────────────────────────
  public:
   GdscriptGenerator( const Parser &parser, const std::string &path, const std::string &file_name, IDLOptionsGdscript opts )
@@ -319,9 +319,14 @@ class GdscriptGenerator final : public BaseGenerator {
       code_.SetValue( "INCLUDE_IDENT", "" );
     }
     code_.SetValue("ROOT_STRUCT", EscapeKeyword( parser_.root_struct_def_->name ) );
-    code_ += "static func get_root( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+    code_ += "static func get_root( _bytes : PackedByteArray, start : int = -1 ) -> {{ROOT_STRUCT}}:";
     code_.IncrementIdentLevel();
-    code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
+    code_ += "var pos = start";
+    code_ += "if pos == -1:";
+    code_.IncrementIdentLevel();
+    code_ += "pos = _bytes.decode_u32(0)";
+    code_.DecrementIdentLevel();
+    code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, pos )";
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -379,11 +384,11 @@ class GdscriptGenerator final : public BaseGenerator {
     if( IsBuiltin(type) ) return "";
     if( IsStruct( type ) or IsTable(type) ){
       if( type.struct_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.struct_def->file];
-      if( type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
+      if( type.struct_def not_eq parser_.root_struct_def_ ) return "_script_parent.";
     }
     if( IsUnion( type ) ){
       if( type.enum_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.enum_def->file];
-      if( type.enum_def->underlying_type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
+      if( type.enum_def->underlying_type.struct_def not_eq parser_.root_struct_def_ ) return "_script_parent.";
     }
     return "";
   }
@@ -762,13 +767,15 @@ class GdscriptGenerator final : public BaseGenerator {
         code_.SetValue("STRUCT_NAME", Name( struct_def ) );
         code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ):";
         code_.IncrementIdentLevel();
-        code_ += "var parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
-        code_ += "parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "var _script_parent = get_script()";
+        code_ += "var struct_data = _script_parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "_script_parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
         code_.DecrementIdentLevel();
         code_ += "";
         code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
         code_.IncrementIdentLevel();
-        code_ += "return parent.get_{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_ += "var _script_parent = get_script()";
+        code_ += "return _script_parent.get_{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
         code_.DecrementIdentLevel();
         code_ += "";
       }
@@ -778,6 +785,33 @@ class GdscriptGenerator final : public BaseGenerator {
         GenFieldDebug( *field );
       }
     }
+
+    // Add to_dict and _to_string methods for better debug
+    code_ += "func to_dict() -> Dictionary:";
+    code_.IncrementIdentLevel();
+    code_ += "var d = {}";
+    for (const auto &field : struct_def.fields.vec) {
+      if (field->deprecated) continue;
+      code_.SetValue("FIELD_NAME", Name(*field));
+      const auto &type = field->value.type;
+      
+      if (field->IsScalar()) {
+        code_ += "d['{{FIELD_NAME}}'] = {{FIELD_NAME}}";
+      } else if (IsStruct(type)) {
+        code_ += "var {{FIELD_NAME}}_value = {{FIELD_NAME}}()";
+        code_ += "d['{{FIELD_NAME}}'] = {{FIELD_NAME}}_value.to_dict() if {{FIELD_NAME}}_value else null";
+      }
+    }
+    code_ += "return d";
+    code_.DecrementIdentLevel();
+    code_ += "";
+    
+    code_ += "func _to_string() -> String:";
+    code_.IncrementIdentLevel();
+    code_ += "return JSON.stringify(to_dict(), '\\t')";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -795,12 +829,17 @@ class GdscriptGenerator final : public BaseGenerator {
     // The root struct has a convenience that the start defaults to zero,
     // and is decoded if zero
     const bool is_root = &struct_def == parser_.root_struct_def_;
-    code_.SetValue( "DEFAULT", is_root ? "= 0" : "" );
+    code_.SetValue( "DEFAULT", is_root ? "= -1" : "" );
     code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "if _bytes.is_empty(): return null";
+    code_ += "var pos = _start";
+    code_ += "if pos == -1:";
+    code_.IncrementIdentLevel();
+    code_ += "pos = _bytes.decode_u32(0)";
+    code_.DecrementIdentLevel();
     code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
-    code_ += "new_{{TABLE_NAME}}.start = _start";
+    code_ += "new_{{TABLE_NAME}}.start = pos";
     code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
     code_ += "return new_{{TABLE_NAME}}";
     code_ += "";
@@ -887,7 +926,9 @@ class GdscriptGenerator final : public BaseGenerator {
               code_.SetValue( "INCLUDE",  GetInclude(type) );
               code_ += "var field_offset = get_field_offset( vtable.{{OFFSET_NAME}} )";
               code_ += "if not field_offset: return null";
-              code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, start + field_offset )";
+              // Declare script_parent locally for resolving circular references
+              code_ += "var _script_parent = get_script()";
+              code_ += "return _script_parent.get_{{GODOT_TYPE}}( bytes, start + field_offset )";
             }
           }
             // Table
@@ -898,7 +939,9 @@ class GdscriptGenerator final : public BaseGenerator {
             if( IsBuiltin( type ) ) {
               code_ += "return decode_{{GODOT_TYPE}}( field_start )";
             } else {
-              code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
+              // Declare script_parent locally for resolving circular references
+              code_ += "var _script_parent = get_script()";
+              code_ += "return _script_parent.get_{{GODOT_TYPE}}( bytes, field_start )";
             }
           }
             // Union
@@ -906,6 +949,8 @@ class GdscriptGenerator final : public BaseGenerator {
             code_.SetValue( "INCLUDE",  GetInclude(type) );
             code_ += "var field_start = get_field_start( vtable.{{OFFSET_NAME}} )";
             code_ += "if not field_start: return null";
+            // Declare script_parent locally for resolving circular references
+            code_ += "var _script_parent = get_script()";
             // match the type
             code_ += "match( {{FIELD_NAME}}_type() ):";
             code_.IncrementIdentLevel();
@@ -919,7 +964,7 @@ class GdscriptGenerator final : public BaseGenerator {
               if( IsBuiltin( type ) ) {
                 code_ += "return decode_{{GODOT_TYPE}}( field_start )";
               } else {
-                code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
+                code_ += "return _script_parent.get_{{GODOT_TYPE}}( bytes, field_start )";
               }
               code_.DecrementIdentLevel();
             }
@@ -967,7 +1012,8 @@ class GdscriptGenerator final : public BaseGenerator {
               case BASE_TYPE_UTYPE:
               case BASE_TYPE_BOOL:
               case BASE_TYPE_UCHAR:
-                code_ += "return bytes.slice( array_start, array_start + array_size )";
+                // Use slice directly for byte arrays - more efficient
+                code_ += "return bytes.slice(array_start, array_start + array_size)";
                 code_.DecrementIdentLevel();
                 code_ += "";
                 //func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
@@ -986,10 +1032,10 @@ class GdscriptGenerator final : public BaseGenerator {
               case BASE_TYPE_UINT:
               case BASE_TYPE_ULONG:
                 code_ += "var array = []";
-                code_ += "array.resize( array_size )";
+                code_ += "array.resize(array_size)";
                 code_ += "for i in array_size:";
                 code_.IncrementIdentLevel();
-                code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
+                code_ += "array[i] = bytes.decode_{{PBA}}(array_start + i * {{ELEMENT_SIZE}})";
                 code_.DecrementIdentLevel();
                 code_ += "return array";
                 code_.DecrementIdentLevel();
@@ -1008,9 +1054,10 @@ class GdscriptGenerator final : public BaseGenerator {
               case BASE_TYPE_LONG:
               case BASE_TYPE_FLOAT:
               case BASE_TYPE_DOUBLE:
+                // Use direct slice and conversion to appropriate array type
                 code_.SetValue("TO_PACKED_FUNC", array_conversion[ element.base_type ] );
                 code_ += "var array_end = array_start + array_size * {{ELEMENT_SIZE}}";
-                code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
+                code_ += "return bytes.slice(array_start, array_end).{{TO_PACKED_FUNC}}";
                 code_.DecrementIdentLevel();
                 code_ += "";
                 //func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
@@ -1043,14 +1090,16 @@ class GdscriptGenerator final : public BaseGenerator {
           else if( IsTable(element ) ){
             code_.SetValue( "INCLUDE",  GetInclude(element) );
             code_.SetValue("ELEMENT_TYPE", GetGodotType( element ) );
-            code_ += "var array : Array; array.resize( array_size )";
+            code_ += "var array : Array"; 
+            code_ += "array.resize(array_size)";
             code_ += "for i in array_size:";
             code_.IncrementIdentLevel();
             code_ += "var pos = array_start + i * 4";
             if( IsBuiltin( element ) ) {
               code_ += "array[i] = decode_{{ELEMENT_TYPE}}( pos + bytes.decode_u32( pos ) )";
             } else {
-              code_ += "array[i] = {{INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
+              code_ += "var _script_parent = get_script()";
+              code_ += "array[i] = _script_parent.get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
             }
 
             code_.DecrementIdentLevel();
@@ -1058,7 +1107,21 @@ class GdscriptGenerator final : public BaseGenerator {
             code_.DecrementIdentLevel();
             code_ += "";
 
-            //TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
+            // Add an accessor for individual elements
+            code_ += "func {{FIELD_NAME}}_at(index : int) -> {{INCLUDE}}{{ELEMENT_TYPE}}:";
+            code_.IncrementIdentLevel();
+            code_ += "var array_start = get_field_start(vtable.{{OFFSET_NAME}})";
+            code_ += "if not array_start: return null";
+            code_ += "array_start += 4";
+            code_ += "var pos = array_start + index * 4";
+            if( IsBuiltin( element ) ) {
+              code_ += "return decode_{{ELEMENT_TYPE}}(pos + bytes.decode_u32(pos))";
+            } else {
+              code_ += "var _script_parent = get_script()";
+              code_ += "return _script_parent.get_{{ELEMENT_TYPE}}(bytes, pos + bytes.decode_u32(pos))";
+            }
+            code_.DecrementIdentLevel();
+            code_ += "";
             return;
           }
           // String
@@ -1090,7 +1153,7 @@ class GdscriptGenerator final : public BaseGenerator {
           }
 
           //TODO - Vector
-          else if( IsVector(element ) ) {
+          else if( IsVector( element ) ) {
             // FIXME Wouldn't this be weird? I have to double check it.
           }
           return;
@@ -1115,11 +1178,11 @@ class GdscriptGenerator final : public BaseGenerator {
   // ║                                   |___/
   // ╙──────────────────────────────────────────
 
-  void GenDebugDict( const StructDef &struct_def ){
+  void GenToDict( const StructDef &struct_def ){
     // There are only two options on how we got here
     // Either we are a table, or we are a struct.
     // Generate Pretty Printer
-    code_ += "func debug() -> Dictionary:";
+    code_ += "func to_dict() -> Dictionary:";
     code_.IncrementIdentLevel();
     code_ += "var d : Dictionary = {}";
     code_ += "d['buffer_size'] = bytes.size()";
@@ -1127,104 +1190,94 @@ class GdscriptGenerator final : public BaseGenerator {
 
     // IF we are a table, then we have a vtable.
     if( struct_def.fixed ) {  // Then we are a struct
-      code_ += "d[{{FIELD_NAME}}] = {{FIELD_NAME}}()";
+      for (const auto &field : struct_def.fields.vec) {
+        if (field->deprecated) continue;
+        code_.SetValue("FIELD_NAME", Name(*field));
+        code_ += "d['{{FIELD_NAME}}'] = {{FIELD_NAME}}()";
+      }
     } else {
-      code_ += "d['vtable_offset'] = bytes.decode_s32( start )";
-      code_ += "d['vtable_start'] = d.start - d.vtable_offset";
-      code_ += "d['vtable'] = Dictionary()";
-      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start )";
-      code_ += "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 )";
-      code_ += "";
-      code_ += "for i in ((d.vtable.vtable_bytes / 2) - 2):";
-      code_ += "\tvar keys = vtable.keys()";
-      code_ += "\tvar offsets = vtable.values()";
-      code_ += "\td.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] )";
-      code_ += "";
-    }
+      code_ += "d['vtable_offset'] = bytes.decode_s32(start)";
+      code_ += "d['vtable_start'] = start - d.vtable_offset";
+      code_ += "d['vtable'] = {}";
+      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16(d.vtable_start)";
+      code_ += "d.vtable['table_size'] = bytes.decode_u16(d.vtable_start + 2)";
 
-    for (const auto &field : struct_def.fields.vec) {
-      if (field->deprecated) {
-        // Deprecated fields won't be accessible.
-        continue;
-      }
-      Type field_type = field->value.type;
-      Type element_type;
-      code_.SetValue( "FIELD_NAME", Name( *field ) );
-      code_.SetValue( "FIELD_TYPE", GetGodotType(field_type ) );
-      if( IsSeries(field_type ) ){
-        element_type = field_type.VectorType();
-        code_.SetValue( "ELEMENT_TYPE", TypeName( field_type.element ) );
-      }
+      for (const auto &field : struct_def.fields.vec) {
+        if (field->deprecated) continue;
+        Type field_type = field->value.type;
+        Type element_type;
+        code_.SetValue("FIELD_NAME", Name(*field));
+        code_.SetValue("FIELD_TYPE", GetGodotType(field_type));
+        if (IsSeries(field_type)) {
+          element_type = field_type.VectorType();
+          code_.SetValue("ELEMENT_TYPE", TypeName(field_type.element));
+        }
 
-      code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field),Case::kAllUpper ));
+        code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
 
-      code_ += "# {{FIELD_NAME}}:{{FIELD_TYPE}} \\";
-      code_ += field->IsRequired() ? "(required)" : "";
-
-      // Field Types:
-      code_.SetValue("DICT", Name( *field ) + "_dict" );
-      code_ += "var {{DICT}} = {'type':'{{FIELD_TYPE}}'}";
-      code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
-
-
-      if( not struct_def.fixed ){ // If we are a table, then all fields are optional.
+        code_ += "# Field: {{FIELD_NAME}} ({{FIELD_TYPE}})";
         code_ += "if {{FIELD_NAME}}_is_present():";
         code_.IncrementIdentLevel();
-      }
 
-      // Scalar
-      if( IsScalar( field_type.base_type ) ){
-        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
-      }
-      // Struct
-      else if( IsStruct(field_type) ){
-        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
-      }
-      // Table
-      else if( IsTable(field_type ) ){
-        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().debug()";
-      }
-      // TODO * Union
-      else if( IsUnion(field_type ) ){
-        code_ += "pass # TODO Union";
-      }
-      // String
-      else if( IsString(field_type ) ){
-        code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
-      }
-      // Vector of
-      else if( IsVector( field_type) ) {
-        code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
-        code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ +=
-            "{{DICT}}['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
         // Scalar
-        if (IsScalar(field_type.element)) {
-          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+        if (IsScalar(field_type.base_type)) {
+          code_ += "d['{{FIELD_NAME}}'] = {{FIELD_NAME}}()";
         }
-        // Struct | Table
-        else if( IsStruct(element_type) or IsTable(element_type) ) {
-          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
-          code_ += "\tfunc( element ): return element.debug() if element else null";
-          code_ += ")";
+        // Struct
+        else if (IsStruct(field_type)) {
+          code_ += "var value = {{FIELD_NAME}}()";
+          code_ += "d['{{FIELD_NAME}}'] = value.to_dict() if value else null";
+        }
+        // Table
+        else if (IsTable(field_type)) {
+          code_ += "var value = {{FIELD_NAME}}()";
+          code_ += "d['{{FIELD_NAME}}'] = value.to_dict() if value else null";
+        }
+        // Union
+        else if (IsUnion(field_type)) {
+          code_ += "var value = {{FIELD_NAME}}()";
+          code_ += "d['{{FIELD_NAME}}'] = str(value) # Union value";
         }
         // String
-        if( IsString(element_type) ){
-          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
+        else if (IsString(field_type)) {
+          code_ += "d['{{FIELD_NAME}}'] = {{FIELD_NAME}}()";
         }
-        // TODO     - Vector
-      }
+        // Vector of
+        else if (IsVector(field_type)) {
+          code_ += "var value_array = {{FIELD_NAME}}()";
+          // Scalar
+          if (IsScalar(field_type.element)) {
+            code_ += "d['{{FIELD_NAME}}'] = value_array";
+          }
+          // Struct or Table
+          else if (IsStruct(element_type) || IsTable(element_type)) {
+            code_ += "d['{{FIELD_NAME}}'] = []";
+            code_ += "for item in value_array:";
+            code_.IncrementIdentLevel();
+            code_ += "d['{{FIELD_NAME}}'].append(item.to_dict() if item else null)";
+            code_.DecrementIdentLevel();
+          }
+          // String
+          else if (IsString(element_type)) {
+            code_ += "d['{{FIELD_NAME}}'] = value_array";
+          }
+        }
 
-      // TODO * Vector of Union
-      // TODO * Fixed length Array
-
-      if( not struct_def.fixed ){ // Come back down after : if {{FIELD_NAME}}_is_present():
         code_.DecrementIdentLevel();
-        code_ += "";
+        code_ += "else:";
+        code_.IncrementIdentLevel();
+        code_ += "d['{{FIELD_NAME}}'] = null";
+        code_.DecrementIdentLevel();
       }
-      code_ += "d['{{FIELD_NAME}}'] = {{DICT}}";
     }
-    code_ += "return d ";
+    code_ += "return d";
+    code_.DecrementIdentLevel();
+    code_ += "";
+    
+    // Add _to_string method for pretty printing
+    code_ += "func _to_string() -> String:";
+    code_.IncrementIdentLevel();
+    code_ += "return JSON.stringify(to_dict(), '\\t')";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1283,8 +1336,8 @@ class GdscriptGenerator final : public BaseGenerator {
         GenAccessFunc(*field);
       }
 
-      // FIXME Hide this behind a cmd line option
-      // GenDebugDict(struct_def);
+      // Add to_dict and _to_string methods for better debug
+      GenToDict(struct_def);
 
       code_.DecrementIdentLevel();
       code_ += "";
