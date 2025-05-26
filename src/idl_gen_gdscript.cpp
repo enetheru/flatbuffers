@@ -268,43 +268,48 @@ class GdscriptGenerator final : public BaseGenerator {
   bool generate() override {
     code_.Clear();
     const auto file_path = GeneratedFileName(path_, file_name_, opts_);
+    code_.SetValue( "FILE_NAME", StripPath(file_path) );
+
 
     code_ += "# " + std::string(FlatBuffersGeneratedWarning() );
     code_ += "";
 
     // Include Files
     include_map[parser_.root_struct_def_->file] = "";
-    for( const auto &[schema_name, include_file] : parser_.GetIncludedFiles() ){
-      if( schema_name == "godot.fbs" ) continue;
+    for( const auto &[include_path, include_file] : parser_.GetIncludedFiles() ){
+      if( include_path == "godot.fbs" ) continue;
+
+      // import path is the default generated script path for that schema
+      auto import_path = GeneratedFileName("", StripExtension(include_path), opts_);
+      auto schema_file = StripPath(include_path);
+      auto schema_ident = StripExtension(schema_file);
+
+      code_.SetValue( "IMPORT_PATH", import_path );
+      code_.SetValue( "SCHEMA_FILE", schema_file );
+      code_.SetValue( "SCHEMA_IDENT", schema_ident + "_schema" );
+
       // Included files are in the form:
-      // const <identifier> = preload("<path>")
-
-      //FIXME IT's currently generating:
-      //const AAChangeList = preload('res://changes/AA_ChangeList_generated.gd')
-
-      // make the identifier CamelCase
-      auto schema_file = StripPath(schema_name);
-      auto schema_ident = ConvertCase(StripExtension(schema_file), Case::kUpperCamel);
-      code_.SetValue( "SCHEMA_IDENT", schema_ident );
+      // const <schema_ident>_schema = preload("<import_path>")
+      // const <ClassName> = <schema_ident>_schema.<ClassName>
 
       // add to the include map for later use
       include_map[include_file] =  schema_ident;
 
-      // get the relative path of the included schema
-      auto schema_path_abs = GeneratedFileName( StripExtension(schema_name),"", opts_);
-      code_.SetValue( "SCHEMA_PATH", "res://" + schema_path_abs );
-      code_ += "const {{SCHEMA_IDENT}} = preload('{{SCHEMA_PATH}}')";
+      code_ += "const {{SCHEMA_IDENT}} = preload('{{IMPORT_PATH}}')";
 
       // Add the enums from the included files as const values
+      // TODO Only add the items we use
       for ( const auto &[enum_ident, enum_def] :  parser_.enums_.dict ) {
         if (const auto &enum_file = enum_def->file; enum_file != include_file ) continue;
-        code_.SetValue( "ENUM_IDENT", enum_ident);
+
+        code_.SetValue( "ENUM_IDENT", EscapeKeyword( enum_def->name ) );
         code_ += "const {{ENUM_IDENT}} = {{SCHEMA_IDENT}}.{{ENUM_IDENT}}";
       }
       // Add the structs and tables from the included files as const values
+      // TODO Only add the items we use
       for ( const auto &[struct_ident, struct_def] :  parser_.structs_.dict ) {
         if (const auto &struct_file = struct_def->file; struct_file != include_file ) continue;
-        code_.SetValue( "STRUCT_IDENT", struct_ident);
+        code_.SetValue( "STRUCT_IDENT", EscapeKeyword( struct_def->name ) );
           code_ += "const {{STRUCT_IDENT}} = {{SCHEMA_IDENT}}.{{STRUCT_IDENT}}";
       }
       code_ += "";
@@ -378,11 +383,9 @@ class GdscriptGenerator final : public BaseGenerator {
   std::string GetInclude(const Type &type ){
     if( IsBuiltin(type) ) return "";
     if( IsStruct( type ) or IsTable(type) ){
-      if( type.struct_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.struct_def->file];
       if( type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
     }
     if( IsUnion( type ) ){
-      if( type.enum_def->file not_eq parser_.root_struct_def_->file ) return include_map[type.enum_def->file];
       if( type.enum_def->underlying_type.struct_def not_eq parser_.root_struct_def_ ) return "parent.";
     }
     return "";
@@ -1257,18 +1260,10 @@ class GdscriptGenerator final : public BaseGenerator {
       code_.IncrementIdentLevel();
 
       // FIXME this parent workaround needs to be resolved
-      // code_ += "static var parent : GDScript";
-      // code_ += "";
+      code_ += "const parent : GDScript = preload(\"{{FILE_NAME}}\")";
+      code_ += "";
 
       GenVtableEnums(struct_def);
-
-      // FIXME parent scope workaround needs to be changed.
-      // code_ += "func _init() -> void:";
-      // code_.IncrementIdentLevel();
-      // code_ += "if not parent:";
-      // code_ += "\tparent = load( '{{FILE_PATH}}' )";
-      // code_.DecrementIdentLevel();
-      // code_ += "";
 
       // Generate the accessors.
       for (const FieldDef *field : struct_def.fields.vec) {
