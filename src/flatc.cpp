@@ -279,6 +279,8 @@ const static FlatCOption flatc_options[] = {
     {"", "grpc-callback-api", "",
      "Generate gRPC code using the callback (reactor) API instead of legacy "
      "sync/async."},
+  { "", "gdscript-debug", "",
+      "Generate an additional debug code to help troubleshoot." },
 };
 
 auto cmp = [](FlatCOption a, FlatCOption b) { return a.long_opt < b.long_opt; };
@@ -753,6 +755,8 @@ FlatCOptions FlatCompiler::ParseFromCommandLineArguments(int argc,
       } else if (arg == "--no-grpc-callback-api" ||
                  arg == "--grpc-callback-api=false") {
         opts.grpc_callback_api = false;
+      } else if (arg == "--gdscript-debug") {
+        opts.gdscript_debug = true;
       } else {
         if (arg == "--proto") {
           opts.proto_mode = true;

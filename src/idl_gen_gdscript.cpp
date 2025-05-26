@@ -1209,7 +1209,6 @@ class GdscriptGenerator final : public BaseGenerator {
 
     {  // generate Flatbuffer derived class
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
-      code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
       code_.IncrementIdentLevel();
 
       code_ += "const _script_parent : GDScript = preload(\"{{FILE_NAME}}\")";
@@ -1230,8 +1229,9 @@ class GdscriptGenerator final : public BaseGenerator {
         GenAccessFunc(*field);
       }
 
-      // FIXME Hide this behind a cmd line option
-      // GenDebugDict(struct_def);
+      if (opts_.gdscript_debug) {
+        GenDebugDict(struct_def);
+      }
 
       code_.DecrementIdentLevel();
       code_ += "";
