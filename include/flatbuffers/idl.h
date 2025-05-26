@@ -707,6 +707,9 @@ struct IDLOptions {
   bool require_json_eof;
   bool keep_proto_id;
 
+  /********************************* GDScript *********************************/
+  bool gdscript_debug;
+
   /********************************** Python **********************************/
   bool python_no_type_prefix_suffix;
   bool python_typing;
@@ -848,6 +851,7 @@ struct IDLOptions {
         no_leak_private_annotations(false),
         require_json_eof(true),
         keep_proto_id(false),
+        gdscript_debug(false),
         python_no_type_prefix_suffix(false),
         python_typing(false),
         python_gen_numpy(true),

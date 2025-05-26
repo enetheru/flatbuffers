@@ -270,6 +270,8 @@ const static FlatCOption flatc_options[] = {
   { "", "grpc-search-path", "PATH", "Prefix to any gRPC includes." },
   { "", "grpc-python-typed-handlers", "",
     "The handlers will use the generated classes rather than raw bytes." },
+    { "", "gdscript-debug", "",
+  "Generate an additional debug code to help troubleshoot." },
 };
 
 auto cmp = [](FlatCOption a, FlatCOption b) { return a.long_opt < b.long_opt; };
@@ -728,6 +730,8 @@ FlatCOptions FlatCompiler::ParseFromCommandLineArguments(int argc,
       } else if (arg == "--no-grpc-python-typed-handlers" ||
                  arg == "--grpc-python-typed-handlers=false") {
         opts.grpc_python_typed_handlers = false;
+      } else if (arg == "--gdscript-debug") {
+        opts.gdscript_debug = true;
       } else {
         if (arg == "--proto") { opts.proto_mode = true; }
 
