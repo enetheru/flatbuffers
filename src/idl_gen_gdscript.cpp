@@ -741,32 +741,6 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
-  // MARK: Gen Static Factory
-  //
-  // ║  ___            ___ _        _   _      ___        _
-  // ║ / __|___ _ _   / __| |_ __ _| |_(_)__  | __|_ _ __| |_ ___ _ _ _  _
-  // ║| (_ / -_) ' \  \__ \  _/ _` |  _| / _| | _/ _` / _|  _/ _ \ '_| || |
-  // ║ \___\___|_||_| |___/\__\__,_|\__|_\__| |_|\__,_\__|\__\___/_|  \_, |
-  // ║                                                                |__/
-  // ╙──────────────────────────────────────────────────────────────────────
-
-  void GenStaticFactory(const StructDef &struct_def) {
-    // The root struct has a convenience that the start defaults to zero,
-    // and is decoded if zero
-    const bool is_root = &struct_def == parser_.root_struct_def_;
-    code_.SetValue("DEFAULT", is_root ? "= 0" : "");
-    code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int {{DEFAULT}} ) -> {{TABLE_NAME}}:";
-    code_.IncrementIdentLevel();
-    code_ += "if _bytes.is_empty(): return null";
-    code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
-    code_ += "new_{{TABLE_NAME}}.start = _start";
-    code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
-    code_ += "return new_{{TABLE_NAME}}";
-    code_ += "";
-    code_.DecrementIdentLevel();
-    code_ += "";
-  }
-
   // MARK: Gen VTable
   //
   // ║  ___           __   _______     _    _
@@ -999,11 +973,11 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "var array : Array; array.resize( array_size )";
       code_ += "for i in array_size:";
       code_.IncrementIdentLevel();
-      code_ += "var pos = array_start + i * 4";
+      code_ += "var p = array_start + i * 4";
       if (IsBuiltin(element)) {
-        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( pos + bytes.decode_u32( pos ) )";
+        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
       } else {
-        code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
+        code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, p + bytes.decode_u32( p ) )";
       }
 
       code_.DecrementIdentLevel();
@@ -1298,10 +1272,20 @@ class GdscriptGenerator final : public BaseGenerator {
 
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
-    // assumes that TABLE_NAME was set previously
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
-    GenStaticFactory(struct_def);
+    // Generate Static Factory
+    code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int ) -> {{TABLE_NAME}}:";
+    code_.IncrementIdentLevel();
+    code_ += "if _bytes.is_empty(): return null";
+    code_ += "if _start == 0: _start = _bytes.decode_u32(0) # 0 always points to a buffer";
+    code_ += "var new_{{TABLE_NAME}} = {{TABLE_NAME}}.new()";
+    code_ += "new_{{TABLE_NAME}}.start = _start";
+    code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
+    code_ += "return new_{{TABLE_NAME}}";
+    code_.DecrementIdentLevel();
+    code_ += "";
+    code_ += "";
 
     {  // generate Flatbuffer derived class
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
