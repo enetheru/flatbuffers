@@ -155,6 +155,7 @@ class GdscriptGenerator final : public BaseGenerator {
       "Quaternion", "AABB",        "Basis",   "Transform3D", "Projection",
       "Color",      nullptr
     };
+    for (auto kw = godot_structs; *kw; kw++) builtin_structs.insert(*kw);
 
     static constexpr const char *godot_stringlike[] = {
       "String", "StringName", "NodePath", nullptr
@@ -170,7 +171,7 @@ class GdscriptGenerator final : public BaseGenerator {
       "packed_string_array", "packed_vector2_array", "packed_vector3_array",
       "packed_color_array",  "packed_vector4_array", nullptr
     };
-    for (auto kw = godot_structs; *kw; kw++) builtin_structs.insert(*kw);
+
 
     static constexpr const char *gdscript_keywords[] = {
       "if",      "elif",     "else",  "for",    "while", "match",
@@ -181,6 +182,10 @@ class GdscriptGenerator final : public BaseGenerator {
       "TAU",     "INF",      "NAN",   nullptr,
     };
 
+    static constexpr const char *packed[] = {
+      "Color", "Vector2", "Vector3", "Vector4", nullptr
+    };
+
     static constexpr const char *my_keywords[] = { "bytes", "start", nullptr };
 
     for (auto kw = godot_structs; *kw; kw++) keywords.insert(*kw);
@@ -189,6 +194,8 @@ class GdscriptGenerator final : public BaseGenerator {
     for (auto kw = godot_arraylike; *kw; kw++) keywords.insert(*kw);
     for (auto kw = gdscript_keywords; *kw; kw++) keywords.insert(*kw);
     for (auto kw = my_keywords; *kw; kw++) keywords.insert(*kw);
+    for (auto item = packed; *item; item++) packed_structs.insert(*item);
+
   }
 
   // MARK: Generate
@@ -300,6 +307,7 @@ class GdscriptGenerator final : public BaseGenerator {
   std::unordered_set<std::string> keywords;
   std::unordered_set<std::string> builtin_structs;
   std::unordered_map<std::string, std::string> include_map;
+  std::unordered_set<std::string> packed_structs;
 
   const IDLOptionsGdscript opts_;
 
@@ -795,6 +803,14 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: GenFieldPresence
+  //
+  // ║  ___          ___ _     _    _ ___
+  // ║ / __|___ _ _ | __(_)___| |__| | _ \_ _ ___ ___ ___ _ _  __ ___
+  // ║| (_ / -_) ' \| _|| / -_) / _` |  _/ '_/ -_|_-</ -_) ' \/ _/ -_)
+  // ║ \___\___|_||_|_| |_\___|_\__,_|_| |_| \___/__/\___|_||_\__\___|
+  // ╙──────────────────────────────────────────────────────────────────────────
+
   void GenPresenceFunc(const FieldDef &field) {
     // Generate presence funcs
     code_.SetValue("FIELD_NAME", Name(field));
@@ -811,12 +827,26 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  // MARK: GenFieldArray
+  //
+  // ║  ___          ___ _     _    _   _
+  // ║ / __|___ _ _ | __(_)___| |__| | /_\  _ _ _ _ __ _ _  _
+  // ║| (_ / -_) ' \| _|| / -_) / _` |/ _ \| '_| '_/ _` | || |
+  // ║ \___\___|_||_|_| |_\___|_\__,_/_/ \_\_| |_| \__,_|\_, |
+  // ╙───────────────────────────────────────────────────|__/───────────────────
+
   void GenFieldArray(const FieldDef &field) {
     const auto &type = field.value.type;
     code_.SetValue("FIELD_NAME", Name(field));
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
-    code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
+
     // Vector of
+    const Type element = type.VectorType();
+    code_.SetValue("ELEMENT_INCLUDE", GetInclude(element) );
+    code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
+    code_.SetValue("ELEMENT_SIZE", element_size[element.base_type]);
+    code_.SetValue("PBA", pba_types[element.base_type]);
+
 
     // func {{FIELD_NAME}}_size() -> int
     code_ += "func {{FIELD_NAME}}_size() -> int:";
@@ -827,13 +857,9 @@ class GdscriptGenerator final : public BaseGenerator {
     code_.DecrementIdentLevel();
     code_ += "";
 
-    // func {{FIELD_NAME}}() -> Array|PackedArray
-    const Type element = type.VectorType();
-    code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
-    code_.SetValue("ELEMENT_SIZE", element_size[element.base_type]);
-    code_.SetValue("PBA", pba_types[element.base_type]);
     // Scalar
     if (IsScalar(element.base_type)) {
+      // func {{FIELD_NAME}}() -> Array|PackedArray
       code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
       code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -906,22 +932,64 @@ class GdscriptGenerator final : public BaseGenerator {
           GenFieldDebug(field);
       }
     }
+
+// TODO create at(idx) accessors
+// class TableName:
+//         const parent = preload("schema_generated.gd")
+//         const Other = parent.Other
+//
+//         func others_at( idx : int ) -> Other:
+//                 var field_start = get_field_start( vtable.VT_OTHERS )
+//                 var array_size = bytes.decode_u32( field_start )
+//                 var array_start = field_start + 4
+//                 assert(field_start, "Field is not present in buffer" )
+//                 assert( idx < array_size, "index is out of bounds")
+//                 var relative_offset = array_start + idx * 4
+//                 var offset = relative_offset + bytes.decode_u32( relative_offset )
+//                 return parent.get_Other( bytes, offset )
+
     // TODO - Struct
     else if (IsStruct(element)) {
-      code_.SetValue("INCLUDE", GetInclude(element));
       // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
+      const auto struct_def = element.struct_def;
+      code_.SetValue("ELEMENT_SIZE", NumToString( struct_def->bytesize) );
+      if (packed_structs.find(struct_def->name) != packed_structs.end()) {
+        code_.SetValue("GODOT_TYPE", "Packed" + GetGodotType(element) + "Array");
+      } else {
+        code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
+      }
       code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
-      code_ += "# TODO Vector of Structs";
-      code_ += "return []";
+
+      code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
+      code_ += "if not array_start: return []";
+      code_ += "var array_size = bytes.decode_u32( array_start )";
+      code_ += "array_start += 4";
+      code_ += "var array : {{GODOT_TYPE}} = []";
+      code_ += "array.resize( array_size )";
+      code_ += "for i in array_size:";
+      code_.IncrementIdentLevel();
+
+      if (IsBuiltin(element)) {
+        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
+      } else {
+        code_ +=
+            "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
+            "( array_start + i * {{ELEMENT_SIZE}} )";
+      }
+
+      code_.DecrementIdentLevel();
+      code_ += "return array";
+
       code_.DecrementIdentLevel();
       code_ += "";
-      return;
     }
     // Table
     else if (IsTable(element)) {
-      code_.SetValue("INCLUDE", GetInclude(element));
-      code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
+      if ( IsIncluded(type) ) {
+
+      }
+      // func {{FIELD_NAME}}() -> Array|PackedArray
       code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
       code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -935,7 +1003,7 @@ class GdscriptGenerator final : public BaseGenerator {
       if (IsBuiltin(element)) {
         code_ += "array[i] = decode_{{ELEMENT_TYPE}}( pos + bytes.decode_u32( pos ) )";
       } else {
-        code_ += "array[i] = {{INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
+        code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, pos + bytes.decode_u32( pos ) )";
       }
 
       code_.DecrementIdentLevel();
@@ -944,10 +1012,10 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "";
 
       // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
-      return;
     }
     // String
     else if (IsString(element)) {
+      // func {{FIELD_NAME}}() -> Array|PackedArray
       code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
       code_.IncrementIdentLevel();
       code_ += "var array_start = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -977,12 +1045,12 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "return decode_String( string_start )";
       code_.DecrementIdentLevel();
       code_ += "";
-      return;
     }
 
     // TODO - Vector
     else if (IsVector(element)) {
       // FIXME Wouldn't this be weird? I have to double check it.
+      code_ += "Error witha vector of vector.";
     }
     // TODO Vector of Union
     // TODO Fixed length Array
