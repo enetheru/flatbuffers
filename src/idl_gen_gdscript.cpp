@@ -216,6 +216,13 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "# " + std::string(FlatBuffersGeneratedWarning());
     code_ += "";
 
+// TODO, rather than have this unsafe method access, we could use a gdscript based
+//       getter which performs the conversion from Variant to PackedByteArray
+    code_ += "# To maintain reference counted PackedByteArray the gdextension type for data";
+    code_ += "# must be Variant, which can trigger the 'unsafe method access' warning if enabled";
+    code_ += "@warning_ignore_start('unsafe_method_access')";
+    code_ += "";
+
     // Include Files
     include_map[parser_.root_struct_def_->file] = "";
     for (const auto &[include_path, include_file] : parser_.GetIncludedFiles()) {
@@ -661,8 +668,9 @@ class GdscriptGenerator final : public BaseGenerator {
     // The generated classes are like a view into a PackedByteArray,
     // it decodes the data on access.
     GenComment(struct_def.doc_comment);
-
     code_.SetValue("STRUCT_NAME", Name(struct_def));
+    code_.SetValue("NUM_BYTES", NumToString(struct_def.bytesize));
+
     // GDScript likes to have empty constructors and cant do overloading.
     // So generate the static factory func in place of a constructor.
     code_ += "static func get_{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int ) -> {{STRUCT_NAME}}:";
@@ -674,18 +682,20 @@ class GdscriptGenerator final : public BaseGenerator {
     // Generate the class definition
     code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
-
-    code_.SetValue("BYTES", NumToString(struct_def.bytesize));
+    code_ += "const size : int = {{NUM_BYTES}}";
+    code_ += "";
     code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "if bytes_.is_empty(): ";
     code_.IncrementIdentLevel();
-    code_ += "var data : PackedByteArray = PackedByteArray()";
-    code_ += "data.resize( {{BYTES}} )";
-    code_ += "bytes = data";
-    code_ += "start = 0";
+    code_ += "bytes = PackedByteArray()";
+    code_ += "bytes.resize( size )";
     code_.DecrementIdentLevel();
-    code_ += "else: bytes = bytes_; start = start_";
+    code_ += "else:";
+    code_.IncrementIdentLevel();
+    code_ += "assert(start_ + size < bytes_.size())";
+    code_ += "bytes = bytes_; start = start_";
+    code_.DecrementIdentLevel();
     code_.DecrementIdentLevel();
     code_ += "";
 
@@ -699,36 +709,33 @@ class GdscriptGenerator final : public BaseGenerator {
       code_.SetValue("FIELD_NAME", Name(*field));
       code_.SetValue("OFFSET", NumToString(field->value.offset));
       code_.SetValue("GODOT_TYPE", GetGodotType(type));
+      IsBuiltin(type);
 
       // Scalars
       if (field->IsScalar()) {
         code_.SetValue("PBA", pba_types[type.base_type]);
-        code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}}";
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return bytes.decode_{{PBA}}(start + {{OFFSET}})\\";
         code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
-        code_ += "set( v ):";
-        code_.IncrementIdentLevel();
-        code_ += "var data : PackedByteArray = bytes";
-        code_ += "data.encode_{{PBA}}(start + {{OFFSET}}, v )";
-        code_ += "bytes = data";
-        code_.DecrementIdentLevel();
+        code_ += "set(v): bytes.encode_{{PBA}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
       }
       // Structs
-      else if (IsStruct(type)) {
-        code_.SetValue("STRUCT_NAME", Name(struct_def));
-        code_ += "func {{FIELD_NAME}}_set( value : {{GODOT_TYPE}} ) -> void:";
+      // FIXME differentiate between godot type and custom type
+      else if (IsStruct(type) && IsBuiltin(type)) {
+        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "var _script_parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
-        code_ += "_script_parent.get_{{GODOT_TYPE}}(start + {{OFFSET}}, bytes)";
+        code_ += "get(): return decode_{{GODOT_TYPE}}(start + {{OFFSET}})";
+        code_ += "set(v): encode_{{GODOT_TYPE}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
-        code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+      } else if (IsStruct(type)) {
+        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "return _script_parent.get_{{STRUCT_NAME}}(start + {{OFFSET}}, bytes)";
+        code_ += "get(): return {{GODOT_TYPE}}.new(bytes, start + {{OFFSET}})";
+        code_ += "set(v): overwrite_bytes(v.bytes, v.start, start + {{OFFSET}}, v.size)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else {
@@ -862,9 +869,9 @@ class GdscriptGenerator final : public BaseGenerator {
         case BASE_TYPE_USHORT:
         case BASE_TYPE_UINT:
         case BASE_TYPE_ULONG:
-          code_ += "var array : Array = []";
-          code_ += "array.resize( array_size )";
-          code_ += "for i in array_size:";
+          code_ += "var array : Array";
+          code_ += "if array.resize( array_size ) != OK: return []";
+          code_ += "for i : int in array_size:";
           code_.IncrementIdentLevel();
           code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
           code_.DecrementIdentLevel();
@@ -939,9 +946,9 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "if not array_start: return []";
       code_ += "var array_size : int = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
-      code_ += "var array : {{GODOT_TYPE}} = []";
-      code_ += "array.resize( array_size )";
-      code_ += "for i in array_size:";
+      code_ += "var array : {{GODOT_TYPE}}";
+      code_ += "if array.resize( array_size ) != OK: return []";
+      code_ += "for i : int in array_size:";
       code_.IncrementIdentLevel();
 
       if (IsBuiltin(element)) {
@@ -970,8 +977,9 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "if not array_start: return []";
       code_ += "var array_size : int = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
-      code_ += "var array : Array; array.resize( array_size )";
-      code_ += "for i in array_size:";
+      code_ += "var array : Array";
+      code_ += "if array.resize( array_size ) != OK: return []";
+      code_ += "for i : int in array_size:";
       code_.IncrementIdentLevel();
       code_ += "var p : int = array_start + i * 4";
       if (IsBuiltin(element)) {
@@ -997,8 +1005,8 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "var array_size : int = bytes.decode_u32( array_start )";
       code_ += "array_start += 4";
       code_ += "var array : {{GODOT_TYPE}}";
-      code_ += "array.resize( array_size )";
-      code_ += "for i in array_size:";
+      code_ += "if array.resize( array_size ) != OK: return []";
+      code_ += "for i : int in array_size:";
       code_.IncrementIdentLevel();
       code_ += "var idx : int = array_start + i * {{ELEMENT_SIZE}}";
       code_ += "var element_start : int = idx + bytes.decode_u32( idx )";
@@ -1156,7 +1164,7 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start )";
       code_ += "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 )";
       code_ += "";
-      code_ += "for i in ((d.vtable.vtable_bytes / 2) - 2):";
+      code_ += "for i : int in ((d.vtable.vtable_bytes / 2) - 2):";
       code_.IncrementIdentLevel();
       code_ += "var keys : Array = vtable.keys()";
       code_ += "var offsets : Array = vtable.values()";
@@ -1228,7 +1236,10 @@ class GdscriptGenerator final : public BaseGenerator {
         else if (IsStruct(element_type) || IsTable(element_type)) {
           code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
           code_.IncrementIdentLevel();
-          code_ += "func( element ): return element.debug() if element else null";
+          code_ += "func( element : FlatBuffer ) -> Dictionary:";
+          code_.IncrementIdentLevel();
+          code_ += "\treturn element.debug() if element else null";
+          code_.DecrementIdentLevel();
           code_.DecrementIdentLevel();
           code_ += ")";
         }
@@ -1291,7 +1302,7 @@ class GdscriptGenerator final : public BaseGenerator {
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
       code_.IncrementIdentLevel();
 
-      code_ += "const _script_parent : GDScript = preload(\"{{FILE_NAME}}\")";
+      code_ += "const _script_parent  = preload(\"{{FILE_NAME}}\")";
       code_ += "";
 
       GenVtableEnums(struct_def);
