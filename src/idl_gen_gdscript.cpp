@@ -1007,18 +1007,318 @@ public:
     code_ += "";
   }
 
-  // MARK: GenFieldArray
-  //
-  // ║  ___          ___ _     _    _   _
-  // ║ / __|___ _ _ | __(_)___| |__| | /_\  _ _ _ _ __ _ _  _
-  // ║| (_ / -_) ' \| _|| / -_) / _` |/ _ \| '_| '_/ _` | || |
-  // ║ \___\___|_||_|_| |_\___|_\__,_/_/ \_\_| |_| \__,_|\_, |
-  // ╙───────────────────────────────────────────────────|__/───────────────────
-
-  void GenFieldArray(const FieldDef &field) {
+  // MARK: GenFieldVectorScalar
+  // ║  ___          ___ _     _    ___   __      _           ___          _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _/ __| __ __ _| |__ _ _ _
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_\__ \/ _/ _` | / _` | '_|
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_| |___/\__\__,_|_\__,_|_|
+  // ╙────────────────────────────────────────────────────────────────────────────────
+  void GenFieldVectorScalarGet(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
     const auto &type = field.value.type;
-    code_.SetValue("FIELD_NAME", Name(field));
-    code_.SetValue("GODOT_TYPE", GetGodotType(type));
+    const Type element = type.VectorType();
+
+    code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return []";
+    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "array_start += 4";
+    switch (element.base_type) {
+      case BASE_TYPE_UTYPE:
+      case BASE_TYPE_BOOL:
+      case BASE_TYPE_UCHAR:
+        code_ += "return bytes.slice( array_start, array_start + array_size )";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        break;
+      case BASE_TYPE_CHAR:
+      case BASE_TYPE_SHORT:
+      case BASE_TYPE_USHORT:
+      case BASE_TYPE_UINT:
+      case BASE_TYPE_ULONG:
+        code_ += "var array : Array";
+        code_ += "if array.resize( array_size ) != OK: return []";
+        code_ += "for i : int in array_size:";
+        code_.IncrementIdentLevel();
+        code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
+        code_.DecrementIdentLevel();
+        code_ += "# To return packed array types, the scalar elements have to be of an appropriate type.";
+        code_ += "return array";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        break;
+      case BASE_TYPE_INT:
+      case BASE_TYPE_LONG:
+      case BASE_TYPE_FLOAT:
+      case BASE_TYPE_DOUBLE:
+        code_.SetValue("TO_PACKED_FUNC", array_conversion[element.base_type]);
+        code_ += "var array_end : int = array_start + array_size * {{ELEMENT_SIZE}}";
+        code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        break;
+      default:
+        // We shouldn't be here.
+        if (opts_.gdscript_debug) {
+          GenFieldDebug(field);
+        }
+    }
+  }
+
+  void GenFieldVectorScalarAt(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    const auto &type = field.value.type;
+    const Type element = type.VectorType();
+
+    code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    switch (element.base_type) {
+      case BASE_TYPE_UTYPE:
+      case BASE_TYPE_BOOL:
+      case BASE_TYPE_UCHAR:
+        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "if not array_start: return 0";
+        code_ += "array_start += 4";
+        code_ += "return bytes[array_start + index]";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        break;
+      case BASE_TYPE_CHAR:
+      case BASE_TYPE_SHORT:
+      case BASE_TYPE_USHORT:
+      case BASE_TYPE_UINT:
+      case BASE_TYPE_ULONG:
+        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "if not array_start: return 0";
+        code_ += "array_start += 4";
+        code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        break;
+      case BASE_TYPE_INT:
+      case BASE_TYPE_LONG:
+      case BASE_TYPE_FLOAT:
+      case BASE_TYPE_DOUBLE:
+        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "if not array_start: return 0";
+        code_ += "array_start += 4";
+        code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        return;
+      default:
+        // We shouldn't be here.
+        if (opts_.gdscript_debug) {
+          GenFieldDebug(field);
+        }
+    }
+  }
+
+  // MARK: GenFieldVectorStruct
+  // ║  ___          ___ _     _    ___   __      _           ___ _               _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _/ __| |_ _ _ _  _ __| |_
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_\__ \  _| '_| || / _|  _|
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_| |___/\__|_|  \_,_\__|\__|
+  // ╙────────────────────────────────────────────────────────────────────────────────
+  void GenFieldVectorStructGet(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    const auto &type = field.value.type;
+    const Type element = type.VectorType();
+    const auto struct_def = element.struct_def;
+
+    code_.SetValue("ELEMENT_SIZE", NumToString( struct_def->bytesize) );
+    if (packed_structs.find(struct_def->name) != packed_structs.end()) {
+      code_.SetValue("GODOT_TYPE", "Packed" + GetGodotType(element) + "Array");
+    } else {
+      code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
+    }
+    code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return []";
+    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "array_start += 4";
+    code_ += "var array : {{GODOT_TYPE}}";
+    code_ += "if array.resize( array_size ) != OK: return []";
+    code_ += "for i : int in array_size:";
+    code_.IncrementIdentLevel();
+
+    if (IsBuiltin(element)) {
+      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
+    } else {
+      code_ +=
+          "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
+          "( array_start + i * {{ELEMENT_SIZE}} )";
+    }
+
+    code_.DecrementIdentLevel();
+    code_ += "return array";
+
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  void GenFieldVectorStructAt(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+
+    // TODO create at(idx) accessors
+    // class TableName:
+    //         const parent = preload("schema_generated.gd")
+    //         const Other = parent.Other
+    //
+    //         func others_at( idx : int ) -> Other:
+    //                 var field_start = get_field_start( vtable.VT_OTHERS )
+    //                 var array_size = bytes.decode_u32( field_start )
+    //                 var array_start = field_start + 4
+    //                 assert(field_start, "Field is not present in buffer" )
+    //                 assert( idx < array_size, "index is out of bounds")
+    //                 var relative_offset = array_start + idx * 4
+    //                 var offset = relative_offset + bytes.decode_u32( relative_offset )
+    //                 return parent.get_Other( bytes, offset )
+    code_ += "# TODO GenFieldVectorStructAt ";
+    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+  }
+
+  // MARK: GenFieldVectorTable
+  // ║  ___          ___ _     _    ___   __      _          _____     _    _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ |_   _|_ _| |__| |___
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_|| |/ _` | '_ \ / -_)
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_|  |_|\__,_|_.__/_\___|
+  // ╙────────────────────────────────────────────────────────────────────────────
+  void GenFieldVectorTableGet(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    const auto &type = field.value.type;
+    const Type element = type.VectorType();
+    if ( IsIncluded(type) ) {
+      // TODO Handle this case properly.
+
+    }
+    // func {{FIELD_NAME}}() -> Array|PackedArray
+    code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return []";
+    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "array_start += 4";
+    code_ += "var array : Array";
+    code_ += "if array.resize( array_size ) != OK: return []";
+    code_ += "for i : int in array_size:";
+    code_.IncrementIdentLevel();
+    code_ += "var p : int = array_start + i * 4";
+    if (IsBuiltin(element)) {
+      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
+    } else {
+      code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, p + bytes.decode_u32( p ) )";
+    }
+
+    code_.DecrementIdentLevel();
+    code_ += "return array";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  void GenFieldVectorTableAt(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
+    code_ += "# TODO GenFieldVectorTableAt ";
+    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+  }
+
+  // MARK: GenFieldVectorString
+  // ║  ___          ___ _     _    ___   __      _           ___ _       _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _/ __| |_ _ _(_)_ _  __ _
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_\__ \  _| '_| | ' \/ _` |
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_| |___/\__|_| |_|_||_\__, |
+  // ║                                                                          |___/
+  // ╙────────────────────────────────────────────────────────────────────────────────
+  void GenFieldVectorStringGet(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // func {{FIELD_NAME}}() -> Array|PackedArray
+    code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return []";
+    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "array_start += 4";
+    code_ += "var array : {{GODOT_TYPE}}";
+    code_ += "if array.resize( array_size ) != OK: return []";
+    code_ += "for i : int in array_size:";
+    code_.IncrementIdentLevel();
+    code_ += "var idx : int = array_start + i * {{ELEMENT_SIZE}}";
+    code_ += "var element_start : int = idx + bytes.decode_u32( idx )";
+    code_ += "array[i] = decode_String( element_start )";
+    code_.DecrementIdentLevel();
+    code_ += "return array";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  void GenFieldVectorStringAt(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return ''";
+    code_ += "array_start += 4";
+    code_ += "var string_start : int = array_start + index * {{ELEMENT_SIZE}}";
+    code_ += "string_start += bytes.decode_u32( string_start )";
+    code_ += "return decode_String( string_start )";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  // MARK: GenFieldVectorUnion
+  // ║  ___          ___ _     _    ___   __      _           _   _      _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _| | | |_ _ (_)___ _ _
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_| |_| | ' \| / _ \ ' \
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_|  \___/|_||_|_\___/_||_|
+  // ╙──────────────────────────────────────────────────────────────────────────────
+  void GenFieldVectorUnionGet(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    code_ += "# TODO GenFieldVectorUnionGet ";
+    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+  }
+
+  void GenFieldVectorUnionAt(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    code_ += "# TODO GenFieldVectorUnionAt ";
+    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+  }
+
+  void GenFieldVectorSize(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    code_ += "func {{FIELD_NAME}}_size() -> int:";
+    code_.IncrementIdentLevel();
+    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not array_start: return 0";
+    code_ += "return bytes.decode_u32( array_start )";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  // MARK: GenFieldVector
+  // ║  ___          ___ _     _    ___   __      _
+  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _
+  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_|
+  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_|
+  // ╙────────────────────────────────────────────────────────
+
+  void GenFieldVector(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    const Type &type = field.value.type;
 
     // Vector of
     const Type element = type.VectorType();
@@ -1027,214 +1327,39 @@ public:
     code_.SetValue("ELEMENT_SIZE", element_size[element.base_type]);
     code_.SetValue("PBA", pba_types[element.base_type]);
 
+    // The size is the same for all vector fields.
+    GenFieldVectorSize(field);
 
-    // func {{FIELD_NAME}}_size() -> int
-    code_ += "func {{FIELD_NAME}}_size() -> int:";
-    code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-    code_ += "if not array_start: return 0";
-    code_ += "return bytes.decode_u32( array_start )";
-    code_.DecrementIdentLevel();
-    code_ += "";
-
-    // Scalar
     if (IsScalar(element.base_type)) {
-      // func {{FIELD_NAME}}() -> Array|PackedArray
-      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-      code_ += "if not array_start: return []";
-      code_ += "var array_size : int = bytes.decode_u32( array_start )";
-      code_ += "array_start += 4";
-      switch (element.base_type) {
-        case BASE_TYPE_UTYPE:
-        case BASE_TYPE_BOOL:
-        case BASE_TYPE_UCHAR:
-          code_ += "return bytes.slice( array_start, array_start + array_size )";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          // func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
-          code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-          code_ += "if not array_start: return 0";
-          code_ += "array_start += 4";
-          code_ += "return bytes[array_start + index]";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          return;
-        case BASE_TYPE_CHAR:
-        case BASE_TYPE_SHORT:
-        case BASE_TYPE_USHORT:
-        case BASE_TYPE_UINT:
-        case BASE_TYPE_ULONG:
-          code_ += "var array : Array";
-          code_ += "if array.resize( array_size ) != OK: return []";
-          code_ += "for i : int in array_size:";
-          code_.IncrementIdentLevel();
-          code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
-          code_.DecrementIdentLevel();
-          code_ += "# To return packed array types, the scalar elements have to be of an appropriate type.";
-          code_ += "return array";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          // func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
-          code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-          code_ += "if not array_start: return 0";
-          code_ += "array_start += 4";
-          code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          return;
-        case BASE_TYPE_INT:
-        case BASE_TYPE_LONG:
-        case BASE_TYPE_FLOAT:
-        case BASE_TYPE_DOUBLE:
-          code_.SetValue("TO_PACKED_FUNC", array_conversion[element.base_type]);
-          code_ += "var array_end : int = array_start + array_size * {{ELEMENT_SIZE}}";
-          code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          // func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
-          code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
-          code_.IncrementIdentLevel();
-          code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-          code_ += "if not array_start: return 0";
-          code_ += "array_start += 4";
-          code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
-          code_.DecrementIdentLevel();
-          code_ += "";
-          return;
-        default:
-          // We shouldn't be here.
-          GenFieldDebug(field);
-      }
+      GenFieldVectorScalarGet( field );
+      GenFieldVectorScalarAt( field );
     }
-
-// TODO create at(idx) accessors
-// class TableName:
-//         const parent = preload("schema_generated.gd")
-//         const Other = parent.Other
-//
-//         func others_at( idx : int ) -> Other:
-//                 var field_start = get_field_start( vtable.VT_OTHERS )
-//                 var array_size = bytes.decode_u32( field_start )
-//                 var array_start = field_start + 4
-//                 assert(field_start, "Field is not present in buffer" )
-//                 assert( idx < array_size, "index is out of bounds")
-//                 var relative_offset = array_start + idx * 4
-//                 var offset = relative_offset + bytes.decode_u32( relative_offset )
-//                 return parent.get_Other( bytes, offset )
-
-    // TODO - Struct
     else if (IsStruct(element)) {
-      // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
-      const auto struct_def = element.struct_def;
-      code_.SetValue("ELEMENT_SIZE", NumToString( struct_def->bytesize) );
-      if (packed_structs.find(struct_def->name) != packed_structs.end()) {
-        code_.SetValue("GODOT_TYPE", "Packed" + GetGodotType(element) + "Array");
-      } else {
-        code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
-      }
-      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-      code_.IncrementIdentLevel();
-
-      code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-      code_ += "if not array_start: return []";
-      code_ += "var array_size : int = bytes.decode_u32( array_start )";
-      code_ += "array_start += 4";
-      code_ += "var array : {{GODOT_TYPE}}";
-      code_ += "if array.resize( array_size ) != OK: return []";
-      code_ += "for i : int in array_size:";
-      code_.IncrementIdentLevel();
-
-      if (IsBuiltin(element)) {
-        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
-      } else {
-        code_ +=
-            "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
-            "( array_start + i * {{ELEMENT_SIZE}} )";
-      }
-
-      code_.DecrementIdentLevel();
-      code_ += "return array";
-
-      code_.DecrementIdentLevel();
-      code_ += "";
+      GenFieldVectorStructGet( field );
+      GenFieldVectorStructAt( field );
     }
-    // Table
     else if (IsTable(element)) {
-      if ( IsIncluded(type) ) {
-
-      }
-      // func {{FIELD_NAME}}() -> Array|PackedArray
-      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-      code_ += "if not array_start: return []";
-      code_ += "var array_size : int = bytes.decode_u32( array_start )";
-      code_ += "array_start += 4";
-      code_ += "var array : Array";
-      code_ += "if array.resize( array_size ) != OK: return []";
-      code_ += "for i : int in array_size:";
-      code_.IncrementIdentLevel();
-      code_ += "var p : int = array_start + i * 4";
-      if (IsBuiltin(element)) {
-        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
-      } else {
-        code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, p + bytes.decode_u32( p ) )";
-      }
-
-      code_.DecrementIdentLevel();
-      code_ += "return array";
-      code_.DecrementIdentLevel();
-      code_ += "";
-
-      // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
+      GenFieldVectorTableGet( field );
+      GenFieldVectorTableAt( field );
     }
-    // String
     else if (IsString(element)) {
-      // func {{FIELD_NAME}}() -> Array|PackedArray
-      code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-      code_ += "if not array_start: return []";
-      code_ += "var array_size : int = bytes.decode_u32( array_start )";
-      code_ += "array_start += 4";
-      code_ += "var array : {{GODOT_TYPE}}";
-      code_ += "if array.resize( array_size ) != OK: return []";
-      code_ += "for i : int in array_size:";
-      code_.IncrementIdentLevel();
-      code_ += "var idx : int = array_start + i * {{ELEMENT_SIZE}}";
-      code_ += "var element_start : int = idx + bytes.decode_u32( idx )";
-      code_ += "array[i] = decode_String( element_start )";
-      code_.DecrementIdentLevel();
-      code_ += "return array";
-      code_.DecrementIdentLevel();
-      code_ += "";
-
-      // func {{FIELD_NAME}}_at( index ) -> {{ELEMENT_TYPE}}:
-      code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
-      code_.IncrementIdentLevel();
-      code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-      code_ += "if not array_start: return ''";
-      code_ += "array_start += 4";
-      code_ += "var string_start : int = array_start + index * {{ELEMENT_SIZE}}";
-      code_ += "string_start += bytes.decode_u32( string_start )";
-      code_ += "return decode_String( string_start )";
-      code_.DecrementIdentLevel();
-      code_ += "";
+      GenFieldVectorStringGet( field );
+      GenFieldVectorStringAt( field );
     }
-
-    // TODO - Vector
-    else if (IsVector(element)) {
-      // FIXME Wouldn't this be weird? I have to double check it.
-      code_ += "Error witha vector of vector.";
+    else if (IsUnion(element)) {
+      GenFieldVectorUnionGet( field );
+      GenFieldVectorUnionAt( field );
     }
-    // TODO Vector of Union
-    // TODO Fixed length Array
+    else {
+      if (opts_.gdscript_debug) {
+        GenFieldDebug(field);
+      } else {
+        code_.SetValue("TYPE_NAME", TypeName(type.base_type));
+        code_ += "# NOTE: Unhandled field type in schema";
+        code_ += "# {{FIELD_NAME}}:{{TYPE_NAME}}";
+      }
+    }
+    // TODO Fixed length Array, is only appropriate for structs
     // TODO Dictionary
   }
 
@@ -1351,8 +1476,7 @@ public:
   // ║| (_ / -_) ' \| _|| / -_) / _` \__ \  _| '_| | ' \/ _` |
   // ║ \___\___|_||_|_| |_\___|_\__,_|___/\__|_| |_|_||_\__, |
   // ╙──────────────────────────────────────────────────|___/-
-  void GenFieldString( const FieldDef &field ) {
-    const auto &type = field.value.type;
+  void GenFieldString( const FieldDef &field [[maybe_unused]]) {
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
@@ -1376,7 +1500,7 @@ public:
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
 
-    if (IsSeries(type)) { GenFieldArray( field ); }
+    if (IsSeries(type)) { GenFieldVector( field ); }
     else if (field.IsScalar()) { GenFieldScalar( field ); }
     else if (IsStruct(type)) { GenFieldStruct( field ); }
     else if (IsTable(type)) { GenFieldTable( field ); }
