@@ -127,6 +127,11 @@ struct IDLOptionsGdscript : public IDLOptions {
 };
 
 
+struct gdIncludeDef {
+  std::string include_name;
+  std::string include_path;
+};
+
 // MARK: GDScriptGenerator
 // ║  ___ ___  ___         _      _    ___                       _
 // ║ / __|   \/ __| __ _ _(_)_ __| |_ / __|___ _ _  ___ _ _ __ _| |_ ___ _ _
@@ -216,6 +221,9 @@ public:
   // Iterate through all definitions we haven't. Generate code for (enums,
   // structs, and tables) and output them to a single file.
   bool generate() override {
+
+    MapIncludedTypes();
+
     code_.Clear();
     const auto file_path = GeneratedFileName(path_, file_name_, opts_);
     code_.SetValue("FILE_NAME", StripPath(file_path));
@@ -309,6 +317,13 @@ public:
       }
     }
 
+    // Generate the static get_<> functions for the tables
+    for (const auto &struct_def : parser_.structs_.vec) {
+      if (!struct_def->fixed && !struct_def->generated) {
+        GenTableGet( *struct_def );
+      }
+    }
+
     const auto final_code = code_.ToString();
 
     // Save the file
@@ -323,13 +338,79 @@ public:
   // ╙|_|──────────────────────────────
  private:
   CodeWriter code_;
+  const IDLOptionsGdscript opts_;
 
   std::unordered_set<std::string> keywords;
   std::unordered_set<std::string> builtin_structs;
   std::unordered_map<std::string, std::string> include_map;
   std::unordered_set<std::string> packed_structs;
 
-  const IDLOptionsGdscript opts_;
+  // List of all the includes
+  std::vector<gdIncludeDef> include_defs;
+
+  // maps the def->file to an include_def for fast lookup
+  std::unordered_map<std::string, gdIncludeDef*> include_fast;
+
+  // maps the flatbuffer type to an include
+  std::unordered_map<std::string, gdIncludeDef *> type_include;
+
+  template<class... args>
+  static std::string strcat(const std::string &head, const args&... tail) {
+    std::ostringstream os;
+    os << head;
+    (os << ... << tail);
+    return os.str();
+  }
+
+  void MapIncludedTypes() {
+    // resize the vector before putting things inside
+    include_defs.resize( parser_.GetIncludedFiles().size() + 1);
+
+    // map the current file first
+    std::string this_file = parser_.file_being_parsed_;
+    gdIncludeDef *this_def = &include_defs.emplace_back( gdIncludeDef{
+      strcat("_",StripExtension(StripPath(this_file)), "_schema"),
+      strcat("'", StripExtension(StripPath(this_file)), "_generated.gd'")
+    });
+    include_fast.emplace(this_file, this_def);
+
+    for (auto &[schema_name, filename] : parser_.GetIncludedFiles()) {
+      if ( include_fast.find(filename) == include_fast.end() ) {
+        gdIncludeDef *new_def = &include_defs.emplace_back( gdIncludeDef{
+         strcat("_", StripExtension(StripPath(filename)), "_schema"),
+         strcat("'", StripExtension(schema_name), "_generated.gd'")});
+        include_fast.emplace(filename, new_def );
+      }
+    }
+
+    // Search through all the types in the parser
+    for( const Type* type : parser_.types_.vec ){
+      // get the definition
+      Definition *def;
+      if ( type->struct_def ) { def = type->struct_def;
+      } else if ( type->enum_def ) {
+        def = type->enum_def;
+      } else { continue; }
+
+      // skip the godot.fbs convenience.
+      if ( StripPath(def->file) == "godot.fbs" ){
+        continue;
+      }
+
+      // map the type to an include_def
+      if ( type_include.find(def->name) == type_include.end() ) {
+        // find the include_def
+        auto inc = include_fast.find(def->file);
+        if ( inc == include_fast.end() ) {
+          printf("Error: Failed to match 'def->file' to an include\n");
+          printf("\t%s : %s\n", def->name.c_str(), def->file.c_str());
+          continue;
+        }
+        // Add the mapping.
+        type_include.emplace(def->name, inc->second);
+      }
+    }
+  }
 
   // MARK: EscapeKeyword
   // ║ ___                       _  __                           _
@@ -341,15 +422,17 @@ public:
     return keywords.find(name) == keywords.end() ? name : name + "_";
   }
 
-  // MARK: IsBuiltin
-  // ║ ___    ___      _ _ _   _
-  // ║|_ _|__| _ )_  _(_) | |_(_)_ _
-  // ║ | |(_-< _ \ || | | |  _| | ' \
-  // ║|___/__/___/\_,_|_|_|\__|_|_||_|
-  // ╙────────────────────────────────
+  /*MARK: IsBuiltin
+  ║ ___    ___      _ _ _   _
+  ║|_ _|__| _ )_  _(_) | |_(_)_ _
+  ║ | |(_-< _ \ || | | |  _| | ' \
+  ║|___/__/___/\_,_|_|_|\__|_|_||_|
+  ╙────────────────────────────────*/
   bool IsBuiltin(const Type &type) {
     return type.struct_def != nullptr &&
            builtin_structs.find(type.struct_def->name) != builtin_structs.end();
+
+    //FIXME use this instead?  if ( StripPath(def->file) == "godot.fbs" )
   }
 
   // MARK: IsIncluded
@@ -370,16 +453,22 @@ public:
   // ║ \___\___|\__|___|_||_\__|_|\_,_\__,_\___|
   // ╙──────────────────────────────────────────
   std::string GetInclude(const Type &type) {
-    if (IsBuiltin(type)) return "";
-    if (IsStruct(type) || IsTable(type)) {
-      if (type.struct_def != parser_.root_struct_def_) return "_script_parent.";
+    // get the definition
+    Definition *def;
+    if ( type.struct_def ) { def = type.struct_def;
+    } else if ( type.enum_def ) {
+      def = type.enum_def;
+    } else { return ""; }
+
+    // skip the godot.fbs convenience.
+    if (StripPath(def->file) == "godot.fbs") { return ""; }
+
+    const auto itr = type_include.find(def->name);
+    if ( itr == type_include.end() ) {
+      return "";
     }
-    if (IsUnion(type)) {
-      if (type.enum_def->underlying_type.struct_def != parser_.root_struct_def_) {
-        return "_script_parent.";
-      }
-    }
-    return "";
+
+    return itr->second->include_name + ".";
   }
 
   // MARK: Name
@@ -640,7 +729,11 @@ public:
     code_ += "#  refcount = " + NumToString(def->refcount);
 
     // const std::string *declaration_file;
-    code_ += "#  declaration_file = " + def->name;
+    if ( def->declaration_file ) {
+      code_ += "#  declaration_file = " + *def->declaration_file;
+    } else {
+      code_ += "#  declaration_file = NULL";
+    }
 
     code_ += "#  ---- ";
   }
@@ -905,7 +998,7 @@ public:
     code_.DecrementIdentLevel();
     code_ += "else:";
     code_.IncrementIdentLevel();
-    code_ += "assert(start_ + size < bytes_.size())";
+    code_ += "assert(start_ + size <= bytes_.size())";
     code_ += "bytes = bytes_; start = start_";
     code_.DecrementIdentLevel();
     code_.DecrementIdentLevel();
@@ -1298,12 +1391,12 @@ public:
     code_ += "";
   }
 
-  // MARK: GenFieldVectorUnion
-  // ║  ___          ___ _     _    ___   __      _           _   _      _
-  // ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _| | | |_ _ (_)___ _ _
-  // ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_| |_| | ' \| / _ \ ' \
-  // ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_|  \___/|_||_|_\___/_||_|
-  // ╙──────────────────────────────────────────────────────────────────────────────
+  /*MARK: GenFieldVectorUnion
+  ║  ___          ___ _     _    ___   __      _           _   _      _
+  ║ / __|___ _ _ | __(_)___| |__| \ \ / /__ __| |_ ___ _ _| | | |_ _ (_)___ _ _
+  ║| (_ / -_) ' \| _|| / -_) / _` |\ V / -_) _|  _/ _ \ '_| |_| | ' \| / _ \ ' \
+  ║ \___\___|_||_|_| |_\___|_\__,_| \_/\___\__|\__\___/_|  \___/|_||_|_\___/_||_|
+  ╙──────────────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorUnionGet(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
@@ -1461,12 +1554,12 @@ public:
     code_ += "";
   }
 
-  // MARK: GenFieldUnion
-  // ║  ___          ___ _     _    _ _   _      _
-  // ║ / __|___ _ _ | __(_)___| |__| | | | |_ _ (_)___ _ _
-  // ║| (_ / -_) ' \| _|| / -_) / _` | |_| | ' \| / _ \ ' \
-  // ║ \___\___|_||_|_| |_\___|_\__,_|\___/|_||_|_\___/_||_|
-  // ╙──────────────────────────────────────────────────────
+  /*MARK: GenFieldUnion
+  ║  ___          ___ _     _    _ _   _      _
+  ║ / __|___ _ _ | __(_)___| |__| | | | |_ _ (_)___ _ _
+  ║| (_ / -_) ' \| _|| / -_) / _` | |_| | ' \| / _ \ ' \
+  ║ \___\___|_||_|_| |_\___|_\__,_|\___/|_||_|_\___/_||_|
+  ╙──────────────────────────────────────────────────────*/
   void GenFieldUnion( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
@@ -1546,6 +1639,29 @@ public:
     }
   }
 
+  /*MARK: GenTableGet
+  ║  ___        _____     _    _      ___     _
+  ║ / __|___ _ |_   _|_ _| |__| |___ / __|___| |_
+  ║| (_ / -_) ' \| |/ _` | '_ \ / -_) (_ / -_)  _|
+  ║ \___\___|_||_|_|\__,_|_.__/_\___|\___\___|\__|
+  ╙───────────────────────────────────────────────
+  GDScript likes to have empty constructors and cant do overloading.
+  So generate the static factory func in place of a constructor.*/
+  void GenTableGet(const StructDef &struct_def) {
+    code_.SetValue("TABLE_NAME", Name(struct_def));
+    code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int ) -> {{TABLE_NAME}}:";
+    code_.IncrementIdentLevel();
+    code_ += "if _bytes.is_empty(): return null";
+    code_ += "if _start == 0: _start = _bytes.decode_u32(0) # 0 always points to a buffer";
+    code_ += "var new_{{TABLE_NAME}} : {{TABLE_NAME}} = {{TABLE_NAME}}.new()";
+    code_ += "new_{{TABLE_NAME}}.start = _start";
+    code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
+    code_ += "return new_{{TABLE_NAME}}";
+    code_.DecrementIdentLevel();
+    code_ += "";
+    code_ += "";
+  }
+
   // MARK: Gen Table
   //
   // ║  ___            _____     _    _
@@ -1560,32 +1676,46 @@ public:
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
 
+    // import files needed for external types
+    std::unordered_map<std::string, std::string> table_includes;
+    for (const FieldDef *field : struct_def.fields.vec) {
+      const auto &type = field->value.type;
+      Definition *def;
+      if ( type.struct_def ) { def = type.struct_def;
+      } else if ( type.enum_def ) {
+        def = type.enum_def;
+      } else {
+        continue;
+      }
+
+      // find the include associated with the type
+      auto itr = type_include.find(def->name);
+      if (itr == type_include.end()) {
+        table_includes.emplace(def->name,
+          strcat("# failed to find include for ", def->name, " using: ", def->file) );
+        continue;
+      }
+
+      // only add if we havent seen it before.
+      if (const gdIncludeDef *idef = itr->second;
+          table_includes.find(idef->include_name) == table_includes.end() ) {
+        table_includes.emplace(idef->include_name,
+        strcat( "const ", idef->include_name, " = preload( ", idef->include_path, " )" ) );
+      }
+    }
+
     GenComment(struct_def.doc_comment);
 
-    // GDScript likes to have empty constructors and cant do overloading.
-    // So generate the static factory func in place of a constructor.
     code_.SetValue("TABLE_NAME", Name(struct_def));
-
-    // Generate Static Factory
-    code_ += "static func get_{{TABLE_NAME}}( _bytes : PackedByteArray, _start : int ) -> {{TABLE_NAME}}:";
-    code_.IncrementIdentLevel();
-    code_ += "if _bytes.is_empty(): return null";
-    code_ += "if _start == 0: _start = _bytes.decode_u32(0) # 0 always points to a buffer";
-    code_ += "var new_{{TABLE_NAME}} : {{TABLE_NAME}} = {{TABLE_NAME}}.new()";
-    code_ += "new_{{TABLE_NAME}}.start = _start";
-    code_ += "new_{{TABLE_NAME}}.bytes = _bytes";
-    code_ += "return new_{{TABLE_NAME}}";
-    code_.DecrementIdentLevel();
-    code_ += "";
-    code_ += "";
 
     {  // generate Flatbuffer derived class
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
       code_.IncrementIdentLevel();
 
       // I need to preload all the dependencies for the class here
-      code_ += "const _script_parent  = preload(\"{{FILE_NAME}}\")";
-
+      for ( auto &[type, include] : table_includes) {
+        code_ += include;
+      }
       code_ += "";
 
       GenVtableEnums(struct_def);
