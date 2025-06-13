@@ -566,14 +566,16 @@ public:
         }
         // Struct | Table
         else if (IsStruct(element_type) || IsTable(element_type)) {
-          code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
-          code_.IncrementIdentLevel();
-          code_ += "func( element : FlatBuffer ) -> Dictionary:";
-          code_.IncrementIdentLevel();
-          code_ += "\treturn element.debug() if element else null";
-          code_.DecrementIdentLevel();
-          code_.DecrementIdentLevel();
-          code_ += ")";
+          //FIXME, this fails when the array type is a Packed type due to the missing map functionn.
+          code_ += "{{DICT}}['value'] = 'FIXME, Packed type arrays break what was here.'";
+          // code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
+          // code_.IncrementIdentLevel();
+          // code_ += "func( element : FlatBuffer ) -> Dictionary:";
+          // code_.IncrementIdentLevel();
+          // code_ += "\treturn element.debug() if element else null";
+          // code_.DecrementIdentLevel();
+          // code_.DecrementIdentLevel();
+          // code_ += ")";
         }
         // String
         if (IsString(element_type)) {
@@ -643,6 +645,63 @@ public:
     code_ += "#  ---- ";
   }
 
+
+  void GenTypeDebug( const Type &type ) {
+    //    BaseType base_type;
+    code_ += "#  base_type: \\";
+    code_ += TypeName(type.base_type);
+
+    //    BaseType element;       // only set if t == BASE_TYPE_VECTOR or
+    //                            // BASE_TYPE_VECTOR64
+    code_ += "#  element: \\";
+    code_ += TypeName(type.element);
+
+    //    StructDef *struct_def;  // only set if t or element ==
+    //    BASE_TYPE_STRUCT
+    code_ += "#  struct_def: \\";
+    code_ += type.struct_def ? "exists" : "<null>";
+    //    EnumDef *enum_def;      // set if t == BASE_TYPE_UNION /
+    //    BASE_TYPE_UTYPE,
+    //                            // or for an integral type derived from an
+    //                            enum.
+    code_ += "#  enum_def: \\";
+    code_ += type.enum_def ? "exists" : "<null>";
+
+    //    uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
+    code_ += "#  fixed_length: " + NumToString(type.fixed_length);
+    if (type.base_type == BASE_TYPE_ARRAY) {
+      code_ += "#  fixed_length is only set when base_type == BASE_TYPE_ARRAY";
+    }
+
+    code_ += "#  IsStruct() = \\";
+    code_ += IsStruct(type) ? "true" : "false";
+    code_ += "#  IsArray() = \\";
+    code_ += IsArray(type) ? "true" : "false";
+    code_ += "#  IsIncompleteStruct: \\";
+    code_ += IsIncompleteStruct(type) ? "true" : "false";
+    code_ += "#  IsUnion() = \\";
+    code_ += IsUnion(type) ? "true" : "false";
+    code_ += "#  IsUnionType() = \\";
+    code_ += IsUnionType(type) ? "true" : "false";
+    code_ += "#  IsSeries() = \\";
+    code_ += IsSeries(type) ? "true" : "false";
+    code_ += "#  IsVector() = \\";
+    code_ += IsVector(type) ? "true" : "false";
+    code_ += "#  IsVectorOfTable() = \\";
+    code_ += IsVectorOfTable(type) ? "true" : "false";
+    code_ += "#  IsVectorOfStruct: \\";
+    code_ += IsVectorOfStruct(type) ? "true" : "false";
+    code_ += "#  IsArray() = \\";
+    code_ += IsArray(type) ? "true" : "false";
+    code_ += "#  IsString() = \\";
+    code_ += IsString(type) ? "true" : "false";
+    code_ += "#  IsTable() = \\";
+    code_ += IsTable(type) ? "true" : "false";
+    code_ += "#  IsEnum() = \\";
+    code_ += IsEnum(type) ? "true" : "false";
+
+  }
+
   // MARK: GenFieldDebug
   // ║  ___          ___ _     _    _ ___      _
   // ║ / __|___ _ _ | __(_)___| |__| |   \ ___| |__ _  _ __ _
@@ -699,62 +758,9 @@ public:
     code_ += "#  offset: " + NumToString(field.value.offset);
     code_ += "#}";
 
-    //  Type type;
     const auto &type = field.value.type;
     code_ += "#FieldDef.Value.Type {";
-    //    BaseType base_type;
-    code_ += "#  base_type: \\";
-    code_ += TypeName(type.base_type);
-
-    //    BaseType element;       // only set if t == BASE_TYPE_VECTOR or
-    //                            // BASE_TYPE_VECTOR64
-    code_ += "#  element: \\";
-    code_ += TypeName(type.element);
-
-    //    StructDef *struct_def;  // only set if t or element ==
-    //    BASE_TYPE_STRUCT
-    code_ += "#  struct_def: \\";
-    code_ += type.struct_def ? "exists" : "<null>";
-    //    EnumDef *enum_def;      // set if t == BASE_TYPE_UNION /
-    //    BASE_TYPE_UTYPE,
-    //                            // or for an integral type derived from an
-    //                            enum.
-    code_ += "#  enum_def: \\";
-    code_ += type.enum_def ? "exists" : "<null>";
-
-    //    uint16_t fixed_length;  // only set if t == BASE_TYPE_ARRAY
-    code_ += "#  fixed_length: " + NumToString(type.fixed_length);
-    if (type.base_type == BASE_TYPE_ARRAY) {
-      code_ += "#  fixed_length is only set when base_type == BASE_TYPE_ARRAY";
-    }
-
-    code_ += "#  IsStruct() = \\";
-    code_ += IsStruct(type) ? "true" : "false";
-    code_ += "#  IsArray() = \\";
-    code_ += IsArray(type) ? "true" : "false";
-    code_ += "#  IsIncompleteStruct: \\";
-    code_ += IsIncompleteStruct(type) ? "true" : "false";
-    code_ += "#  IsUnion() = \\";
-    code_ += IsUnion(type) ? "true" : "false";
-    code_ += "#  IsUnionType() = \\";
-    code_ += IsUnionType(type) ? "true" : "false";
-    code_ += "#  IsSeries() = \\";
-    code_ += IsSeries(type) ? "true" : "false";
-    code_ += "#  IsVector() = \\";
-    code_ += IsVector(type) ? "true" : "false";
-    code_ += "#  IsVectorOfTable() = \\";
-    code_ += IsVectorOfTable(type) ? "true" : "false";
-    code_ += "#  IsVectorOfStruct: \\";
-    code_ += IsVectorOfStruct(type) ? "true" : "false";
-    code_ += "#  IsArray() = \\";
-    code_ += IsArray(type) ? "true" : "false";
-    code_ += "#  IsString() = \\";
-    code_ += IsString(type) ? "true" : "false";
-    code_ += "#  IsTable() = \\";
-    code_ += IsTable(type) ? "true" : "false";
-    code_ += "#  IsEnum() = \\";
-    code_ += IsEnum(type) ? "true" : "false";
-
+    GenTypeDebug( type );
     code_ += "#}";
 
     if (IsTable(type) && field.value.type.struct_def) {
@@ -799,7 +805,7 @@ public:
       code_ += "#  reserved_ids = ? (std::vector<voffset_t>)";
     }
 
-    if (IsEnum(type)) {
+    else if (IsEnum(type)) {
       const auto &enum_def = *type.enum_def;
       code_ += "#FieldDef.Value.EnumDef {";
 
@@ -818,6 +824,13 @@ public:
       code_ += "#  MaxValue() = " + NumToString(enum_def.MaxValue());
       //      Type underlying_type;
       code_ += "#}";
+    }
+    else if ( IsSeries(type) ) {
+      if (type.struct_def) {
+        code_ += "#FieldDef.Value.Type.struct_def = {";
+        GenDefinitionDebug(type.struct_def);
+        code_ += "#}";
+      }
     }
   }
 
@@ -1153,7 +1166,7 @@ public:
     } else {
       code_ +=
           "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
-          "( array_start + i * {{ELEMENT_SIZE}} )";
+          "(bytes, array_start + i * {{ELEMENT_SIZE}} )";
     }
 
     code_.DecrementIdentLevel();
@@ -1183,6 +1196,10 @@ public:
     //                 return parent.get_Other( bytes, offset )
     code_ += "# TODO GenFieldVectorStructAt ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "";
+    if (opts_.gdscript_debug) {
+      GenFieldDebug(field);
+    }
   }
 
   // MARK: GenFieldVectorTable
@@ -1230,6 +1247,10 @@ public:
     // TODO {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:
     code_ += "# TODO GenFieldVectorTableAt ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "";
+    if (opts_.gdscript_debug) {
+      GenFieldDebug(field);
+    }
   }
 
   // MARK: GenFieldVectorString
@@ -1288,6 +1309,10 @@ public:
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionGet ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "";
+    if (opts_.gdscript_debug) {
+      GenFieldDebug(field);
+    }
   }
 
   void GenFieldVectorUnionAt(const FieldDef &field [[maybe_unused]]) {
@@ -1295,6 +1320,10 @@ public:
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionAt ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "";
+    if (opts_.gdscript_debug) {
+      GenFieldDebug(field);
+    }
   }
 
   void GenFieldVectorSize(const FieldDef &field [[maybe_unused]]) {
@@ -1554,7 +1583,9 @@ public:
       code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
       code_.IncrementIdentLevel();
 
+      // I need to preload all the dependencies for the class here
       code_ += "const _script_parent  = preload(\"{{FILE_NAME}}\")";
+
       code_ += "";
 
       GenVtableEnums(struct_def);
