@@ -16,96 +16,99 @@ namespace flatbuffers {
 
 namespace gdscript {
 
-// FIXME Consolidate the naming across the project
-const char *add_element_func[] = {
-    "",               // 0 NONE
-    "add_element_ubyte",      // 1 UTYPE
-    "add_element_bool",      // 2 BOOL
-    "add_element_byte",       // 3 CHAR
-    "add_element_ubyte",      // 4 UCHAR
-    "add_element_short",      // 5 SHORT
-    "add_element_ushort",     // 6 USHORT
-    "add_element_int",      // 7 INT
-    "add_element_uint",     // 8 UINT
-    "add_element_long",      // 9 LONG
-    "add_element_ulong",     //10 ULONG
-    "add_element_float",    //11 FLOAT
-    "add_element_double",    //12 DOUBLE
-    ""/*STRING*/,""/*VECTOR*/, "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
-};
 
-const char *vector_create_func[] = {
-  "",               // 0 NONE
-  "create_vector_uint8",      // 1 UTYPE
-  "create_vector_uint8",      // 2 BOOL
-  "create_vector_int8",       // 3 CHAR
-  "create_vector_uint8",      // 4 UCHAR
-  "create_vector_int16",      // 5 SHORT
-  "create_vector_uint16",     // 6 USHORT
-  "create_vector_int32",      // 7 INT
-  "create_vector_uint32",     // 8 UINT
-  "create_vector_int64",      // 9 LONG
-  "create_vector_uint64",     //10 ULONG
-  "create_vector_float32",    //11 FLOAT
-  "create_vector_float64",    //12 DOUBLE
-  "create_PackedStringArray", //13 STRING
-  "", /* VECTOR */ "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
-};
 
+// The fields are:
+// - enum
+// - FlatBuffers schema type.
+// - C++ type.
+// - PBASUFFIX is the PackedByteArray.{decode|encode}_* functions
+// - enum value (matches the reflected values)
+
+//  BASE_TYPE ADD_FUNC CREATE_FUNC  PBA_SUFFIX  PBA_TO
 // PackedByteArray types for encode_* and decode_* functions
-const char *pba_types[] = {
-    "",        // 0 NONE
-    "u8",      // 1 UTYPE
-    "u8",      // 2 BOOL
-    "s8",      // 3 CHAR
-    "u8",      // 4 UCHAR
-    "s16",     // 5 SHORT
-    "u16",     // 6 USHORT
-    "s32",     // 7 INT
-    "u32",     // 8 UINT
-    "s64",     // 9 LONG
-    "u64",     //10 ULONG
-    "float",   //11 FLOAT
-    "double",  //12 DOUBLE
-    ""/*STRING*/,""/* VECTOR */, ""/* STRUCT */,
-    ""/* UNION */, ""/* ARRAY */, ""/* VECTOR64 */,
+
+
+//   ENUM      IDLTYPE,  CTYPE,          GDTYPE,  PBA_SUFFIX,   PBA_CONVERSION         PACKED_TYPE        ENUM_VALUE
+#define GODOT_GEN_TYPES_SCALAR(TD) \
+  TD(NONE,     "",       uint8_t,        int,     "",           "",                      Array,               0) \
+  TD(UTYPE,    "",       uint8_t,        int,     "u8",         "",                      Array,               1) /* begin scalar/int */ \
+  TD(BOOL,     "bool",   uint8_t,        int,     "u8",         "",                      Array,               2) \
+  TD(CHAR,     "byte",   int8_t,         bool,    "s8",         "",                      Array,               3) \
+  TD(UCHAR,    "ubyte",  uint8_t,        int,     "u8",         "",                      PackedByteArray,     4) \
+  TD(SHORT,    "short",  int16_t,        int,     "s16",        "",                      Array,               5) \
+  TD(USHORT,   "ushort", uint16_t,       int,     "u16",        "",                      Array,               6) \
+  TD(INT,      "int",    int32_t,        int,     "s32",        "to_int32_array",        PackedInt32Array,    7) \
+  TD(UINT,     "uint",   uint32_t,       int,     "u32",        "",                      Array,               8) \
+  TD(LONG,     "long",   int64_t,        int,     "s64",        "to_int64_array",        PackedInt64Array,    9) \
+  TD(ULONG,    "ulong",  uint64_t,       int,     "u64",        "",                      Array,              10) /* end int */ \
+  TD(FLOAT,    "float",  float,          float,   "float",      "to_float32_array",      PackedFloat32Array, 11) /* begin float */ \
+  TD(DOUBLE,   "double", double,         float,   "double",     "to_float64_array",      PackedFloat64Array, 12) /* end float/scalar */
+#define GODOT_GEN_TYPES_POINTER(TD) \
+  TD(STRING,   "string", Offset<void>,   String,  "",           "get_string_from_utf8",  PackedStringArray,  13) \
+  TD(VECTOR,   "",       Offset<void>,   Array,   "",           "",                      Array,              14) \
+  TD(VECTOR64, "",       Offset64<void>, Array,   "",           "",                      Array,              18) \
+  TD(STRUCT,   "",       Offset<void>,   int,     "",           "",                      Array,              15) \
+  TD(UNION,    "",       Offset<void>,   Variant, "",           "",                      Array,              16)
+#define GODOT_GEN_TYPE_ARRAY(TD) \
+  TD(ARRAY,    "",       int,            Array,   "",           "",                      Array,              17)
+
+#define GODOT_GEN_TYPES(TD) \
+GODOT_GEN_TYPES_SCALAR(TD) \
+GODOT_GEN_TYPES_POINTER(TD) \
+GODOT_GEN_TYPE_ARRAY(TD)
+
+inline const char* testing[] = {
+#define GODOT_TD(ENUM, IDLTYPE, ...) \
+#ENUM,
+    GODOT_GEN_TYPES(GODOT_TD)
+#undef GODOT_TD
 };
 
-const char *element_size[] = {
-    "", // 0 NONE
-    "1", // 1 UTYPE
-    "1", // 2 BOOL
-    "1", // 3 CHAR
-    "1", // 4 UCHAR
-    "2", // 5 SHORT
-    "2", // 6 USHORT
-    "4", // 7 INT
-    "4", // 8 UINT
-    "8", // 9 LONG
-    "8", //10 ULONG
-    "4", //11 FLOAT
-    "8", //12 DOUBLE
-    "4", //13 STRING - a list of offsets to the strings
-    "4", //14 VECTOR - a list of offsets to the tables
-    "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
-};
+inline const char* gdPBASuffix(const BaseType t) {
+  switch (t) {
+#define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, PBASUFFIX, ...) \
+case BASE_TYPE_##ENUM: return PBASUFFIX;
+    GODOT_GEN_TYPES(GODOT_TD)
+#undef GODOT_TD
+  default: FLATBUFFERS_ASSERT(0);
+  }
+  return "";
+}
 
-const char *array_conversion[] = {
-    "<Error>",            // 0 NONE
-    "<Error>",            // 1 UTYPE
-    "<Error>",            // 2 BOOL
-    "<Error>",            // 3 CHAR
-    "<Error>",            // 4 UCHAR
-    "<Error>",            // 5 SHORT
-    "<Error>",            // 6 USHORT
-    "to_int32_array()",   // 7 INT
-    "<Error>",            // 8 UINT
-    "to_int64_array()",    // 9 LONG
-    "<Error>",            //10 ULONG
-    "to_float32_array()", //11 FLOAT
-    "to_float64_array()", //12 DOUBLE
-    "", /* VECTOR */ "", /* STRUCT */ "", /* UNION */ "", /* ARRAY */ "", /* VECTOR64 */
-};
+inline const char* gdPBAConvert(const BaseType t) {
+  switch (t) {
+#define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, PBAS, PBAC, ...) \
+case BASE_TYPE_##ENUM: return PBAC;
+    GODOT_GEN_TYPES(GODOT_TD)
+#undef GODOT_TD
+  default: FLATBUFFERS_ASSERT(0);
+  }
+  return "";
+}
+
+inline const char* gdType(const BaseType t) {
+  switch (t) {
+#define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, ...) \
+case BASE_TYPE_##ENUM: return #GDTYPE;
+    GODOT_GEN_TYPES(GODOT_TD)
+#undef GODOT_TD
+  default: FLATBUFFERS_ASSERT(0);
+  }
+  return "";
+}
+
+inline const char* gdArrayType(const BaseType t) {
+  switch (t) {
+#define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, PBAS, PBAC, ARRAY, ...) \
+case BASE_TYPE_##ENUM: return #ARRAY;
+    GODOT_GEN_TYPES(GODOT_TD)
+#undef GODOT_TD
+  default: FLATBUFFERS_ASSERT(0);
+  }
+  return "";
+}
+
 
 // Extension of IDLOptions for gdscript-generator.
 struct IDLOptionsGdscript : public IDLOptions {
@@ -426,6 +429,45 @@ public:
     }
   }
 
+  std::unordered_map<std::string, std::string> CollectStructIncludes(const StructDef &struct_def) {
+    // import files needed for external types
+    std::unordered_map<std::string, std::string> struct_includes;
+    for (const FieldDef *field : struct_def.fields.vec) {
+      const auto &type = field->value.type;
+      Definition *def;
+      if (type.struct_def) {
+        def = type.struct_def;
+      } else if (type.enum_def) {
+        def = type.enum_def;
+      } else {
+        continue;
+      }
+
+      if ( StripPath(def->file) == "godot.fbs" ) {
+        continue;
+      }
+
+      // find the include associated with the type
+      auto itr = type_include.find(def->name);
+      if (itr == type_include.end()) {
+        struct_includes.emplace(
+            def->name, strcat("# failed to find include for ", def->name,
+                              " using: ", def->file));
+        continue;
+      }
+
+      // only add if we havent seen it before.
+      if (const gdIncludeDef *idef = itr->second;
+          struct_includes.find(idef->include_name) == struct_includes.end()) {
+        struct_includes.emplace(
+            idef->include_name,
+            strcat("const ", idef->include_name, " = preload( ",
+                   idef->include_path, " )"));
+          }
+    }
+    return struct_includes;
+  }
+
   /*MARK: EscapeKeyword
   ║ ___                       _  __                           _
   ║| __|___ __ __ _ _ __  ___| |/ /___ _  ___ __ _____ _ _ __| |
@@ -536,32 +578,13 @@ public:
   ║ \___\___|\__|\___\___/\__,_\___/\__||_| \_, | .__/\___|
   ╙─────────────────────────────────────────|__/|_|────────*/
   std::string GetGodotType(const Type &type) {
-    if (IsBool(type.base_type)) { return "bool"; }
     if (IsEnum(type)) { return EscapeKeyword(type.enum_def->name); }
-    if (IsInteger(type.base_type)) { return "int"; }
-    if (IsFloat(type.base_type)) { return "float"; }
-    if (IsString(type)) { return "String"; }
     if (IsStruct(type) || IsTable(type)) {
       if (IsBuiltin(type)) { return type.struct_def->name; }
       return EscapeKeyword(type.struct_def->name);
     }
-    if (IsSeries(type)) {
-      if (IsScalar(type.element)) {
-        switch (type.element) {
-          case BASE_TYPE_UCHAR: return "PackedByteArray";
-          case BASE_TYPE_INT: return "PackedInt32Array";
-          case BASE_TYPE_LONG: return "PackedInt64Array";
-          case BASE_TYPE_FLOAT: return "PackedFloat32Array";
-          case BASE_TYPE_DOUBLE: return "PackedFloat64Array";
-          default: break;
-        }
-      } else if (IsString(type.VectorType())) {
-        return "PackedStringArray";
-      }
-      return "Array";
-    }
-    if (IsUnion(type)) { return "Variant"; }
-    return "_TODO_";
+    if (IsSeries(type)) { return gdArrayType(type.element); }
+    return gdType( type.base_type );
   }
 
   /*MARK: GenComment
@@ -754,6 +777,38 @@ public:
     }
 
     code_ += "#  ---- ";
+  }
+
+  void GenEnumDebug(const EnumDef *enum_def) {
+    GenDefinitionDebug( enum_def );
+    code_ += "# EnumDev Debug";
+    code_ += "# AllFlags(): ??";
+    // code_ += enum_def->AllFlags();
+
+    code_ += "# MinValue(): \\";
+    const auto min = enum_def->MinValue();
+    code_ += min->name + " = " + enum_def->ToString(*min);
+
+    code_ += "# MaxValue(): \\";
+    const auto max = enum_def->MaxValue();
+    code_ += max->name + " = " + enum_def->ToString(*max);
+
+    code_ += "# size(): \\";
+    code_ += NumToString( enum_def->size() );
+
+    //   const std::vector<EnumVal *> &Vals() const { return vals.vec; }
+
+    code_ += "# is_union: \\";
+    code_ += enum_def->is_union ? "true" : "false";
+
+    // Type is a union which uses type aliases where at least one type is
+    // available under two different names.
+    code_ += "# uses_multiple_type_instances: \\";
+    code_ += enum_def->uses_multiple_type_instances ? "true" : "false";
+
+    code_ += "# underlying_type: \\";
+    code_ += TypeName(enum_def->underlying_type.base_type);
+
   }
 
 
@@ -1063,11 +1118,27 @@ public:
   void GenStructArrayGet(const FieldDef &field [[maybe_unused]]) {
     // Already defined
     // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
-    code_ += "# TODO: Unimplemented";
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX, FIXED_LENGTH
+
+    const Type element = field.value.type.VectorType();
     code_ += "func get_{{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "return []";
+    if ( IsScalar( element.base_type  )) {
+      code_.SetValue("PBA_CONVERT", gdPBAConvert(element.base_type));
+      code_ += "# TODO Scalar Type";
+      code_ += "return bytes.slice({{OFFSET}}, \\";
+      code_ += "{{OFFSET}} + {{FIXED_LENGTH}} * {{ELEMENT_SIZE}}).{{PBA_CONVERT}}()";
+    } else if ( IsBuiltin( element ) ) {
+      code_ += "# TODO Builtin Type";
+      code_ += "return []";
+    } else if ( IsStruct(element) ) {
+      code_ += "# TODO Struct Type";
+      code_ += "return []";
+    } else {
+      code_ += "# FIXME Unknown Type";
+      code_ += "return []";
+    }
+
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1075,10 +1146,20 @@ public:
   void GenStructArraySet(const FieldDef &field [[maybe_unused]]) {
     // Already defined
     // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
-    code_ += "# TODO: Unimplemented";
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX, FIXED_LENGTH
+    const Type element = field.value.type.VectorType();
     code_ += "func set_{{FIELD_NAME}}( _v : {{GODOT_TYPE}} ):";
     code_.IncrementIdentLevel();
+    if ( IsScalar( element.base_type  )) {
+      code_ += "# TODO Scalar Type";
+    } else if ( IsBuiltin( element ) ) {
+      code_ += "# TODO Builtin Type";
+    } else if ( IsStruct(element) ) {
+      code_ += "# TODO Struct Type";
+    } else {
+      code_ += "return null";
+      code_ += "# FIXME Unknown Type";
+    }
     code_ += "pass";
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1087,11 +1168,22 @@ public:
   void GenStructArrayAt(const FieldDef &field [[maybe_unused]]) {
     // Already defined
     // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX, FIXED_LENGTH
+    const Type element = field.value.type.VectorType();
     code_ += "func at_{{FIELD_NAME}}( idx : int ) -> {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "assert( idx < {{FIXED_LENGTH}})";
-    code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+    if ( IsScalar( element.base_type  )) {
+      code_.SetValue("PBA_SUFFIX", gdPBASuffix(element.base_type));
+      code_ += "return bytes.decode_{{PBA_SUFFIX}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+    } else if ( IsBuiltin( element ) ) {
+      code_ += "return bytes.decode_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+    } else if ( IsStruct(element) ) {
+      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+    } else {
+      code_ += "return null";
+      code_ += "# FIXME Unknown Type";
+    }
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1178,14 +1270,14 @@ public:
       code_.SetValue("OFFSET", NumToString(field->value.offset));
       code_.SetValue("GODOT_TYPE", GetGodotType(type));
       code_.SetValue("INCLUDE", GetInclude(type));
-
+      code_ += "# [================[ {{FIELD_NAME}} ]================]";
       if (field->IsScalar()) {
-        code_.SetValue("PBA", pba_types[type.base_type]);
+        code_.SetValue("PBASUFFIX", gdPBASuffix(type.base_type));
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return bytes.decode_{{PBA}}(start + {{OFFSET}})\\";
+        code_ += "get(): return bytes.decode_{{PBASUFFIX}}(start + {{OFFSET}})\\";
         code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
-        code_ += "set(v): bytes.encode_{{PBA}}(start + {{OFFSET}}, v)";
+        code_ += "set(v): bytes.encode_{{PBASUFFIX}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type) && IsBuiltin(type)) {
@@ -1209,7 +1301,7 @@ public:
         code_.SetValue("ELEMENT_INCLUDE", GetInclude(element) );
         code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
         code_.SetValue("ELEMENT_SIZE", NumToString(InlineSize(element) ));
-        code_.SetValue("PBA", pba_types[element.base_type]);
+
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get = get_{{FIELD_NAME}}, set = set_{{FIELD_NAME}}";
@@ -1292,7 +1384,7 @@ public:
   ╙────────────────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorScalarGet(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     const auto &type = field.value.type;
     const Type element = type.VectorType();
 
@@ -1319,7 +1411,7 @@ public:
         code_ += "if array.resize( array_size ) != OK: return []";
         code_ += "for i : int in array_size:";
         code_.IncrementIdentLevel();
-        code_ += "array[i] = bytes.decode_{{PBA}}( array_start + i * {{ELEMENT_SIZE}})";
+        code_ += "array[i] = bytes.decode_{{PBASUFFIX}}( array_start + i * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "# To return packed array types, the scalar elements have to be of an appropriate type.";
         code_ += "return array";
@@ -1330,9 +1422,9 @@ public:
       case BASE_TYPE_LONG:
       case BASE_TYPE_FLOAT:
       case BASE_TYPE_DOUBLE:
-        code_.SetValue("TO_PACKED_FUNC", array_conversion[element.base_type]);
+        code_.SetValue("PBA_CONVERT", gdPBAConvert(element.base_type));
         code_ += "var array_end : int = array_start + array_size * {{ELEMENT_SIZE}}";
-        code_ += "return bytes.slice( array_start, array_end ).{{TO_PACKED_FUNC}}";
+        code_ += "return bytes.slice( array_start, array_end ).{{PBA_CONVERT}}()";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1346,7 +1438,7 @@ public:
 
   void GenFieldVectorScalarAt(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     const auto &type = field.value.type;
     const Type element = type.VectorType();
 
@@ -1371,7 +1463,7 @@ public:
         code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
-        code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1382,7 +1474,7 @@ public:
         code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
-        code_ += "return bytes.decode_{{PBA}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "";
         return;
@@ -1402,7 +1494,7 @@ public:
   ╙────────────────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorStructGet(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     const auto &type = field.value.type;
     const Type element = type.VectorType();
     const auto struct_def = element.struct_def;
@@ -1442,7 +1534,7 @@ public:
 
   void GenFieldVectorStructAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
 
     code_ += "func {{FIELD_NAME}}_at( idx : int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
@@ -1453,7 +1545,11 @@ public:
     code_ += "assert( idx < array_size, 'index is out of bounds')";
     code_ += "var relative_offset = array_start + idx * 4";
     code_ += "var offset = relative_offset + bytes.decode_u32( relative_offset )";
-    code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";
+    if ( IsBuiltin(field.value.type.VectorType() ) ) {
+      code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
+    }else {
+      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";
+    }
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1466,7 +1562,7 @@ public:
   ╙────────────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorTableGet(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     const auto &type = field.value.type;
     const Type element = type.VectorType();
     if ( IsIncluded(type) ) {
@@ -1505,7 +1601,7 @@ public:
   ╙──────────────────────────────────────────────────────────────────────────|___/-*/
   void GenFieldVectorStringGet(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
@@ -1528,7 +1624,7 @@ public:
 
   void GenFieldVectorStringAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1549,7 +1645,7 @@ public:
   ╙──────────────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorUnionGet(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionGet ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
     code_ += "";
@@ -1560,7 +1656,7 @@ public:
 
   void GenFieldVectorUnionAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionAt ";
     code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
     code_ += "";
@@ -1577,7 +1673,7 @@ public:
   ╙─────────────────────────────────────────────────────────────────────*/
   void GenFieldVectorSize(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
-    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA were set in GenFieldVector
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
     code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1601,8 +1697,8 @@ public:
     const Type element = type.VectorType();
     code_.SetValue("ELEMENT_INCLUDE", GetInclude(element) );
     code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
-    code_.SetValue("ELEMENT_SIZE", element_size[element.base_type]);
-    code_.SetValue("PBA", pba_types[element.base_type]);
+    code_.SetValue("ELEMENT_SIZE", NumToString(SizeOf(element.base_type)));
+    code_.SetValue("PBASUFFIX", gdPBASuffix(element.base_type));
 
     // The size is the same for all vector fields.
     GenFieldVectorSize(field);
@@ -1649,18 +1745,14 @@ public:
   void GenFieldScalar( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
-
-    code_.SetValue("PBA", pba_types[type.base_type]);
+    code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var foffset : int = get_field_offset( vtable.{{OFFSET_NAME}} )";
-    code_ += "if not foffset: return " + field.value.constant + "\\";
-    code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
-    code_ += "return bytes.decode_{{PBA}}( start + foffset )\\";
-    code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
+    code_ += "if not foffset: return " + field.value.constant;
+    code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset )";
     code_.DecrementIdentLevel();
     code_ += "";
-
   }
 
   /*MARK: GenFieldStruct
@@ -1709,6 +1801,20 @@ public:
     code_ += "";
   }
 
+  void GenFieldEnum( const FieldDef &field ) {
+    // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
+    const auto &type = field.value.type;
+    code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
+    code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var foffset : int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not foffset: return " + field.value.constant + " as {{GODOT_TYPE}}";
+    code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset ) as {{GODOT_TYPE}}";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+
   /*MARK: GenFieldUnion
   ║  ___          ___ _     _    _ _   _      _
   ║ / __|___ _ _ | __(_)___| |__| | | | |_ _ (_)___ _ _
@@ -1718,6 +1824,12 @@ public:
   void GenFieldUnion( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
+    // Unions are made of two parts, one of them is a scalar Enum
+    if (field.IsScalar()) {
+      GenFieldEnum( field );
+      return;
+    }
+
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_.SetValue("INCLUDE", GetInclude(type));
@@ -1777,11 +1889,12 @@ public:
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
 
-    if (IsSeries(type)) { GenFieldVector( field ); }
-    else if (field.IsScalar()) { GenFieldScalar( field ); }
+    if (IsUnion(type)) { GenFieldUnion( field ); }
+    else if (IsEnum(type)) { GenFieldEnum( field ); }
+    else if (field.IsScalar()) {GenFieldScalar( field );}
     else if (IsStruct(type)) { GenFieldStruct( field ); }
     else if (IsTable(type)) { GenFieldTable( field ); }
-    else if (IsUnion(type)) { GenFieldUnion( field ); }
+    else if (IsSeries(type)) { GenFieldVector( field ); }
     else if (IsString(type)) { GenFieldString( field ); }
     else {
       if (opts_.gdscript_debug) {
@@ -1792,45 +1905,6 @@ public:
         code_ += "# {{FIELD_NAME}}:{{TYPE_NAME}}";
       }
     }
-  }
-
-  std::unordered_map<std::string, std::string> CollectStructIncludes(const StructDef &struct_def) {
-    // import files needed for external types
-    std::unordered_map<std::string, std::string> struct_includes;
-    for (const FieldDef *field : struct_def.fields.vec) {
-      const auto &type = field->value.type;
-      Definition *def;
-      if (type.struct_def) {
-        def = type.struct_def;
-      } else if (type.enum_def) {
-        def = type.enum_def;
-      } else {
-        continue;
-      }
-
-      if ( StripPath(def->file) == "godot.fbs" ) {
-        continue;
-      }
-
-      // find the include associated with the type
-      auto itr = type_include.find(def->name);
-      if (itr == type_include.end()) {
-        struct_includes.emplace(
-            def->name, strcat("# failed to find include for ", def->name,
-                              " using: ", def->file));
-        continue;
-      }
-
-      // only add if we havent seen it before.
-      if (const gdIncludeDef *idef = itr->second;
-          struct_includes.find(idef->include_name) == struct_includes.end()) {
-        struct_includes.emplace(
-            idef->include_name,
-            strcat("const ", idef->include_name, " = preload( ",
-                   idef->include_path, " )"));
-      }
-    }
-    return struct_includes;
   }
 
   // Init function to prevent a rather spicy footgun
@@ -1950,12 +2024,25 @@ public:
       code_ += "func add_{{FIELD_NAME}}( {{PARAM_NAME}} : {{INCLUDE}}{{PARAM_TYPE}} ) -> void:";
       code_.IncrementIdentLevel();
 
-      // Scalar
-      if (field->IsScalar()) {
-        code_.SetValue("TYPE", add_element_func[type.base_type]);
-        code_ += "fbb_.{{TYPE}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
+      // Seems the ordering here is important, because a scalar value can also be a union or enum type.
+      // So I have to start with the enum first, then union, then scalar.
+      if (IsUnion(type)) {
+        // Unions are made of two fields, One to store the offset to the object,
+        // and the other to identify which object is stored.
+        if ( IsScalar(type.base_type) ) { // The identifier
+          code_ += "fbb_.add_element_ubyte( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        } else {
+          code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        }
       }
-      // Struct
+      else if (IsEnum(type)) {
+        code_.SetValue("TYPE_NAME", TypeName(type.base_type) );
+        code_ += "fbb_.add_element_{{TYPE_NAME}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+      }
+      else if (field->IsScalar()) {
+        code_.SetValue("TYPE_NAME", TypeName(type.base_type));
+        code_ += "fbb_.add_element_{{TYPE_NAME}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
+      }
       else if (IsStruct(type)) {
         if (IsBuiltin(type)) {
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
@@ -1963,26 +2050,14 @@ public:
           code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
         }
       }
-      // Table
       else if (IsTable(type)) {
         code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
-      // Union
-      else if (IsUnion(type)) {
-        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
-      }
-      // String
       else if (IsString(type)) {
         code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
-      // TODO Vector of
       else if (IsVector(type)) {
         code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
-        // TODO - Scalar
-        // TODO - Struct
-        // TODO - Table
-        // TODO - String
-        // TODO - Vector
       }
       // TODO Vector of Union
       // TODO Fixed length Array
@@ -1990,7 +2065,7 @@ public:
       else {
         code_ += "# FIXME Unknown Type";
         code_ += "pass";
-        GenFieldDebug(*field);
+        if ( opts_.gdscript_debug )GenFieldDebug(*field);
       }
 
       code_.DecrementIdentLevel();
@@ -2159,9 +2234,9 @@ public:
           else if (IsVector(field_type) && !IsUnion(element_type)) {
             // Scalar
             if (IsScalar(element_type.base_type)) {
-              code_.SetValue("CREATE_FUNC", vector_create_func[element_type.base_type]);
+              code_.SetValue("TYPE_NAME", TypeName(element_type.base_type));
               code_ += "var {{FIELD_NAME}}_offset : int = "
-                  "_fbb.{{CREATE_FUNC}}( object.{{FIELD_NAME}} )";
+                  "_fbb.create_vector_{{TYPE_NAME}}( object.{{FIELD_NAME}} )";
             }
             // TODO - Struct
             else if (IsStruct(element_type)) {
@@ -2184,9 +2259,8 @@ public:
             }
             // String
             else if (IsString(element_type)) {
-              code_.SetValue("CREATE_FUNC", vector_create_func[element_type.base_type]);
               code_ += "var {{FIELD_NAME}}_offset : int = "
-                  "_fbb.{{CREATE_FUNC}}( object.{{FIELD_NAME}} )";
+                  "_fbb.create_PackedStringArray( object.{{FIELD_NAME}} )";
             }
             // TODO - Vector
             else if (IsVector(element_type)) {
