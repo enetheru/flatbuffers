@@ -456,8 +456,13 @@ public:
   ║|___/__/___|_||_\__|_|\_,_\__,_\___\__,_|
   ╙─────────────────────────────────────────*/
   bool IsIncluded(const Type &type) const {
-    return type.struct_def != nullptr &&
-           type.struct_def->file != parser_.root_struct_def_->file;
+    Definition *def;
+    if ( type.struct_def ) { def = type.struct_def;
+    } else if ( type.enum_def ) {
+      def = type.enum_def;
+    } else { return false; }
+
+    return def->file != parser_.root_struct_def_->file;
   }
 
   /*MARK: GetInclude
@@ -981,9 +986,6 @@ public:
     code_ += "static func get_{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int = 0 ) -> {{STRUCT_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "assert(not _bytes.is_empty())";
-    if ( struct_def.fixed ){
-      code_ += "assert(_start + {{STRUCT_NAME}}.size <= _bytes.size())";
-    }
     code_ += "return {{STRUCT_NAME}}.new(_bytes, _start)";
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1052,41 +1054,56 @@ public:
     code_ += "";
   }
 
-
-  /*MARK: Gen Struct
-  ║  ___            ___ _               _
-  ║ / __|___ _ _   / __| |_ _ _ _  _ __| |_
-  ║| (_ / -_) ' \  \__ \  _| '_| || / _|  _|
-  ║ \___\___|_||_| |___/\__|_|  \_,_\__|\__|
-  ╙──────────────────────────────────────────*/
-  void GenStruct(const StructDef &struct_def) {
-    // Generate class to access the structs fields
-    // The generated classes are like a view into a PackedByteArray,
-    // it decodes the data on access.
-    auto struct_includes = CollectStructIncludes( struct_def );
-
-    GenComment(struct_def.doc_comment);
-
-    code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_.SetValue("NUM_BYTES", NumToString(struct_def.bytesize));
-
-    // Generate the class definition
-    code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
+  /*MARK: GenStructArray
+  ║  ___          ___ _               _     _
+  ║ / __|___ _ _ / __| |_ _ _ _  _ __| |_  /_\  _ _ _ _ __ _ _  _
+  ║| (_ / -_) ' \\__ \  _| '_| || / _|  _|/ _ \| '_| '_/ _` | || |
+  ║ \___\___|_||_|___/\__|_|  \_,_\__|\__/_/ \_\_| |_| \__,_|\_, |
+  ╙──────────────────────────────────────────────────────────|__/-*/
+  void GenStructArrayGet(const FieldDef &field [[maybe_unused]]) {
+    // Already defined
+    // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
+    code_ += "# TODO: Unimplemented";
+    code_ += "func get_{{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-
-    // I need to preload all the dependencies for the class here
-    bool add_nl = false;
-    for ( auto &[type, include] : struct_includes) {
-      code_ += include;
-      add_nl = true;
-    }
-    if( add_nl ) code_ += "";
-
-    // Add the fixed size
-    code_ += "const size : int = {{NUM_BYTES}}";
+    code_ += "return []";
+    code_.DecrementIdentLevel();
     code_ += "";
+  }
 
-    // Init function to prevent a rather spicy footgun
+  void GenStructArraySet(const FieldDef &field [[maybe_unused]]) {
+    // Already defined
+    // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
+    code_ += "# TODO: Unimplemented";
+    code_ += "func set_{{FIELD_NAME}}( _v : {{GODOT_TYPE}} ):";
+    code_.IncrementIdentLevel();
+    code_ += "pass";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  void GenStructArrayAt(const FieldDef &field [[maybe_unused]]) {
+    // Already defined
+    // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBA, FIXED_LENGTH
+    code_ += "func at_{{FIELD_NAME}}( idx : int ) -> {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "assert( idx < {{FIXED_LENGTH}})";
+    code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+  /*MARK: GenStructInit
+  ║  ___          ___ _               _   ___      _ _
+  ║ / __|___ _ _ / __| |_ _ _ _  _ __| |_|_ _|_ _ (_) |_
+  ║| (_ / -_) ' \\__ \  _| '_| || / _|  _|| || ' \| |  _|
+  ║ \___\___|_||_|___/\__|_|  \_,_\__|\__|___|_||_|_|\__|
+  ╙──────────────────────────────────────────────────────*/
+  // Init function to prevent a rather spicy footgun
+  void GenStructInit(const StructDef &struct_def[[maybe_unused]]) {
     code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "if bytes_.is_empty(): ";
@@ -1101,11 +1118,59 @@ public:
     code_.DecrementIdentLevel();
     code_.DecrementIdentLevel();
     code_ += "";
+  }
 
-    // How do I set the data for the field? :
-    for (const auto &field : struct_def.fields.vec) {
+  /*MARK: GenStructIncludes
+  ║  ___          ___ _               _   ___         _         _
+  ║ / __|___ _ _ / __| |_ _ _ _  _ __| |_|_ _|_ _  __| |_  _ __| |___ ___
+  ║| (_ / -_) ' \\__ \  _| '_| || / _|  _|| || ' \/ _| | || / _` / -_|_-<
+  ║ \___\___|_||_|___/\__|_|  \_,_\__|\__|___|_||_\__|_|\_,_\__,_\___/__/
+  ╙──────────────────────────────────────────────────────────────────────*/
+  void GenStructIncludes(const StructDef &struct_def) {
+    auto struct_includes = CollectStructIncludes( struct_def );
+    if (struct_includes.empty()) {
+      return;
+    }
+    for ( auto &[type, include] : struct_includes ) {
+      code_ += include;
+    }
+    code_ += "";
+  }
+
+  /*MARK: Gen Struct
+  ║  ___            ___ _               _
+  ║ / __|___ _ _   / __| |_ _ _ _  _ __| |_
+  ║| (_ / -_) ' \  \__ \  _| '_| || / _|  _|
+  ║ \___\___|_||_| |___/\__|_|  \_,_\__|\__|
+  ╙──────────────────────────────────────────*/
+  void GenStruct(const StructDef &struct_def) {
+    // Generate class to access the structs fields
+    // The generated classes are like a view into a PackedByteArray,
+    // it decodes the data on access.
+    GenComment(struct_def.doc_comment);
+
+    code_.SetValue("STRUCT_NAME", Name(struct_def));
+    code_.SetValue("NUM_BYTES", NumToString(struct_def.bytesize));
+
+    // Generate the class definition
+    code_ += "class {{STRUCT_NAME}} extends FlatBuffer:";
+    code_.IncrementIdentLevel();
+
+    // I need to preload all the dependencies for the class here
+    GenStructIncludes( struct_def );
+
+    // Add the fixed size
+    code_ += "const size : int = {{NUM_BYTES}}";
+    code_ += "";
+
+    // Init function to prevent a rather spicy footgun
+    GenStructInit(struct_def);
+
+    for (const auto field : struct_def.fields.vec) {
       if (field->deprecated) {
-        continue;  // Deprecated fields won't be accessible.
+        // Deprecated fields won't be accessible.
+        // TODO generate deprecated field with flag?
+        continue;
       }
 
       const auto &type = field->value.type;
@@ -1113,9 +1178,7 @@ public:
       code_.SetValue("OFFSET", NumToString(field->value.offset));
       code_.SetValue("GODOT_TYPE", GetGodotType(type));
       code_.SetValue("INCLUDE", GetInclude(type));
-      IsBuiltin(type);
 
-      // Scalars
       if (field->IsScalar()) {
         code_.SetValue("PBA", pba_types[type.base_type]);
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
@@ -1125,10 +1188,7 @@ public:
         code_ += "set(v): bytes.encode_{{PBA}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
-      }
-      // Structs
-      // FIXME differentiate between godot type and custom type
-      else if (IsStruct(type) && IsBuiltin(type)) {
+      } else if (IsStruct(type) && IsBuiltin(type)) {
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return decode_{{GODOT_TYPE}}(start + {{OFFSET}})";
@@ -1142,6 +1202,22 @@ public:
         code_ += "set(v): overwrite_bytes(v.bytes, v.start, start + {{OFFSET}}, v.size)";
         code_.DecrementIdentLevel();
         code_ += "";
+      } else if (IsArray(type)){
+        const Type element = type.VectorType();
+        code_.SetValue("ARRAY_SIZE", NumToString(InlineSize(type)) );
+        code_.SetValue("FIXED_LENGTH", NumToString( type.fixed_length ) );
+        code_.SetValue("ELEMENT_INCLUDE", GetInclude(element) );
+        code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
+        code_.SetValue("ELEMENT_SIZE", NumToString(InlineSize(element) ));
+        code_.SetValue("PBA", pba_types[element.base_type]);
+        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_.IncrementIdentLevel();
+        code_ += "get = get_{{FIELD_NAME}}, set = set_{{FIELD_NAME}}";
+        code_.DecrementIdentLevel();
+        code_ += "";
+        GenStructArrayGet( *field );
+        GenStructArraySet( *field );
+        GenStructArrayAt( *field );
       } else {
         code_ += "#TODO - Unhandled Type";
         code_ += "pass";
@@ -1757,6 +1833,16 @@ public:
     return struct_includes;
   }
 
+  // Init function to prevent a rather spicy footgun
+  void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
+    code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
+    code_.IncrementIdentLevel();
+    code_ += "assert(not bytes_.is_empty())";
+    code_ += "bytes = bytes_; start = start_";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
   /*MARK: Gen Table
   ║  ___            _____     _    _
   ║ / __|___ _ _   |_   _|_ _| |__| |___
@@ -1768,68 +1854,50 @@ public:
     // Generate classes to access the table fields
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
-
-    // import files needed for external types
-    auto table_includes = CollectStructIncludes( struct_def );
-
     GenComment(struct_def.doc_comment);
 
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
-    {  // generate Flatbuffer derived class
-      code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
-      code_.IncrementIdentLevel();
+    // generate Flatbuffer derived class
+    code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
+    code_.IncrementIdentLevel();
 
-      // I need to preload all the dependencies for the class here
-      for ( auto &[type, include] : table_includes) {
-        code_ += include;
+    GenStructIncludes(struct_def);
+    GenVtableEnums(struct_def);
+    GenTableInit(struct_def);
+
+    // Generate Presence Function
+    // {{FIELD_NAME}}_is_present() -> bool
+    code_ += "# Presence Functions";
+    for (const FieldDef *field : struct_def.fields.vec) {
+      code_.SetValue("FIELD_NAME", Name(*field));
+      if (field->deprecated) {
+        code_ += "# field:'{{FIELD_NAME}}' is deprecated\n";
+        // Deprecated fields won't be accessible.
+        continue;
       }
-      code_ += "";
-
-      // Init function to prevent a rather spicy footgun
-      code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
-      code_.IncrementIdentLevel();
-      code_ += "assert(not bytes_.is_empty())";
-      code_ += "bytes = bytes_; start = start_";
-      code_.DecrementIdentLevel();
-      code_ += "";
-
-      GenVtableEnums(struct_def);
-
-      // Generate Presence Function
-      // {{FIELD_NAME}}_is_present() -> bool
-      code_ += "# Presence Functions";
-      for (const FieldDef *field : struct_def.fields.vec) {
-        code_.SetValue("FIELD_NAME", Name(*field));
-        if (field->deprecated) {
-          code_ += "# field:'{{FIELD_NAME}}' is deprecated\n";
-          // Deprecated fields won't be accessible.
-          continue;
-        }
-        code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
-        GenPresenceFunc(*field);
-      }
-
-      // Generate the accessors.
-      for (const FieldDef *field : struct_def.fields.vec) {
-        code_.SetValue("FIELD_NAME", Name(*field));
-        if (field->deprecated) {
-          if (opts_.gdscript_debug) {
-            code_ += "# field:'{{FIELD_NAME}}' is deprecated";
-          }
-          continue;
-        }
-        code_ += "# [================[ {{FIELD_NAME}} ]================]";
-        GenField(*field);
-      }
-
-      if (opts_.gdscript_debug) {
-        GenDebugDict(struct_def);
-      }
-
-      code_.DecrementIdentLevel();
-      code_ += "";
+      code_.SetValue("OFFSET_NAME",
+                     "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
+      GenPresenceFunc(*field);
     }
+
+    // Generate the accessors.
+    for (const FieldDef *field : struct_def.fields.vec) {
+      code_.SetValue("FIELD_NAME", Name(*field));
+      if (field->deprecated) {
+        if (opts_.gdscript_debug) {
+          code_ += "# field:'{{FIELD_NAME}}' is deprecated";
+        }
+        continue;
+      }
+      code_ += "# [================[ {{FIELD_NAME}} ]================]";
+      GenField(*field);
+    }
+
+    if (opts_.gdscript_debug) { GenDebugDict(struct_def); }
+
+    code_.DecrementIdentLevel();
+    code_ += "";
   }
 
   /*MARK: Gen Builder
