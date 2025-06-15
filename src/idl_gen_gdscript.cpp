@@ -58,13 +58,6 @@ GODOT_GEN_TYPES_SCALAR(TD) \
 GODOT_GEN_TYPES_POINTER(TD) \
 GODOT_GEN_TYPE_ARRAY(TD)
 
-inline const char* testing[] = {
-#define GODOT_TD(ENUM, IDLTYPE, ...) \
-#ENUM,
-    GODOT_GEN_TYPES(GODOT_TD)
-#undef GODOT_TD
-};
-
 inline const char* gdPBASuffix(const BaseType t) {
   switch (t) {
 #define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, PBASUFFIX, ...) \
@@ -235,8 +228,9 @@ public:
 // TODO, rather than have this unsafe method access, we could use a gdscript based
 //       getter which performs the conversion from Variant to PackedByteArray
     code_ += "# To maintain reference counted PackedByteArray the gdextension type for data";
-    code_ += "# must be Variant, which can trigger the 'unsafe method access' warning if enabled";
+    code_ += "# must be Variant, which triggers these two notices";
     code_ += "@warning_ignore_start('unsafe_method_access')";
+    code_ += "@warning_ignore_start('unsafe_call_argument')";
     code_ += "";
 
     // Include Files
@@ -350,6 +344,11 @@ public:
  private:
   CodeWriter code_;
   const IDLOptionsGdscript opts_;
+  const CommentConfig comment_config{
+    nullptr,
+    "#",
+    nullptr
+  };
 
   std::unordered_set<std::string> keywords;
   std::unordered_set<std::string> builtin_structs;
@@ -593,10 +592,12 @@ public:
   ║| (_ / -_) ' \ (__/ _ \ '  \| '  \/ -_) ' \  _|
   ║ \___\___|_||_\___\___/_|_|_|_|_|_\___|_||_\__|
   ╙───────────────────────────────────────────────*/
-  void GenComment(const std::vector<std::string> &dc, const char *prefix_ = "#") {
-    std::string text;
-    ::flatbuffers::GenComment(dc, &text, nullptr, prefix_);
-    code_ += text + "\\";
+  void GenComment(const std::vector<std::string> &dc) {
+    if (dc.empty()) return;
+    std::string comment;
+    flatbuffers::GenComment(dc, &comment, &comment_config, "");
+    comment.pop_back(); // get rid of the newline.
+    code_ += comment;
   }
 
 
@@ -1538,13 +1539,13 @@ public:
 
     code_ += "func {{FIELD_NAME}}_at( idx : int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start = get_field_start( vtable.{{OFFSET_NAME}} )";
-    code_ += "var array_size = bytes.decode_u32( field_start )";
-    code_ += "var array_start = field_start + 4";
+    code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_size : int = bytes.decode_u32( field_start )";
+    code_ += "var array_start : int = field_start + 4";
     code_ += "assert(field_start, 'Field is not present in buffer' )";
     code_ += "assert( idx < array_size, 'index is out of bounds')";
-    code_ += "var relative_offset = array_start + idx * 4";
-    code_ += "var offset = relative_offset + bytes.decode_u32( relative_offset )";
+    code_ += "var relative_offset : int = array_start + idx * 4";
+    code_ += "var offset : int = relative_offset + bytes.decode_u32( relative_offset )";
     if ( IsBuiltin(field.value.type.VectorType() ) ) {
       code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
     }else {
@@ -1965,6 +1966,7 @@ public:
         continue;
       }
       code_ += "# [================[ {{FIELD_NAME}} ]================]";
+      GenComment(field->doc_comment);
       GenField(*field);
     }
 
