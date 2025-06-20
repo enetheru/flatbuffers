@@ -329,6 +329,15 @@ public:
       }
     }
 
+    // Optional: UnPackObject API
+    if ( opts_.generate_object_based_api ) {
+      for (const auto &struct_def : parser_.structs_.vec) {
+        if (!struct_def->fixed && !struct_def->generated) {
+          GenUnPackObject( *struct_def );
+        }
+      }
+    }
+
     const auto final_code = code_.ToString();
 
     // Save the file
@@ -382,7 +391,7 @@ public:
     // resize the vector before putting things inside
     include_defs.resize( parser_.GetIncludedFiles().size() + 1);
 
-    // map the current file first
+    // add the current file as it wont be in the included list otherwise.
     std::string this_file = parser_.file_being_parsed_;
     gdIncludeDef *this_def = &include_defs.emplace_back( gdIncludeDef{
       strcat("_",StripExtension(StripPath(this_file)), "_schema"),
@@ -390,6 +399,7 @@ public:
     });
     include_fast.emplace(this_file, this_def);
 
+    // add the included files
     for (auto &[schema_name, filename] : parser_.GetIncludedFiles()) {
       if ( include_fast.find(filename) == include_fast.end() ) {
         gdIncludeDef *new_def = &include_defs.emplace_back( gdIncludeDef{
@@ -428,9 +438,23 @@ public:
     }
   }
 
+  // returns a map like
+  // [include_name, "const <include_name>  = preload( <include_path> )"]
+  // with fields taken from gdInclude struct.
   std::unordered_map<std::string, std::string> CollectStructIncludes(const StructDef &struct_def) {
     // import files needed for external types
     std::unordered_map<std::string, std::string> struct_includes;
+
+    // we need to include ourselves under some circumstances
+    if ( opts_.generate_object_based_api ) {
+      // The first element of the map is always the current file
+      const gdIncludeDef *idef = type_include.begin()->second;
+      struct_includes.emplace(
+            idef->include_name,
+            strcat("const ", idef->include_name, " = preload( ",
+                   idef->include_path, " )"));
+    }
+
     for (const FieldDef *field : struct_def.fields.vec) {
       const auto &type = field->value.type;
       Definition *def;
@@ -1912,7 +1936,6 @@ public:
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
     code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
     code_.IncrementIdentLevel();
-    code_ += "assert(not bytes_.is_empty())";
     code_ += "bytes = bytes_; start = start_";
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1970,6 +1993,9 @@ public:
       GenField(*field);
     }
 
+    if( opts_.generate_object_based_api ){
+      GenPackUnPack( struct_def );
+    }
     if (opts_.gdscript_debug) { GenDebugDict(struct_def); }
 
     code_.DecrementIdentLevel();
@@ -2103,7 +2129,7 @@ public:
   ║ \___\___|_||_|  \___|_| \___\__,_|\__\___|
   ╙────────────────────────────────────────────*/
   void GenTableCreate(const StructDef &struct_def) {
-    // Generate a convenient CreateX function that uses the above builder
+    // Generate a convenient create_<name> function that uses the above builder
     // to create a table in one go.
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
@@ -2169,140 +2195,109 @@ public:
     code_ += "";
   }
 
-  /*MARK: Gen Create2
-  ║  ___             ___              _       ___
-  ║ / __|___ _ _    / __|_ _ ___ __ _| |_ ___|_  )
-  ║| (_ / -_) ' \  | (__| '_/ -_) _` |  _/ -_)/ /
-  ║ \___\___|_||_|  \___|_| \___\__,_|\__\___/___|
-  ╙────────────────────────────────────────────────*/
-  void GenCreateFunc2(const StructDef &struct_def) {
-    // Generate a convenient CreateX function that uses the above builder
-    // to create a table in one go.
+  /*MARK: Pack / UnPack
 
-    code_ += "static func create_{{STRUCT_NAME}}2( _fbb : FlatBufferBuilder, object : Variant ) -> int:";
+  ║ ___         _       __  _   _      ___         _
+  ║| _ \__ _ __| |__   / / | | | |_ _ | _ \__ _ __| |__
+  ║|  _/ _` / _| / /  / /  | |_| | ' \|  _/ _` / _| / /
+  ║|_| \__,_\__|_\_\ /_/    \___/|_||_|_| \__,_\__|_\_\
+  ╙─────────────────────────────────────────────────────*/
+  void GenPackUnPack(const StructDef &struct_def) {
+    // defined values: TABLE_NAME
+    code_ += "# Pack/UnPack Object based API";
+    const Value *godot_type = struct_def.attributes.Lookup("godot_type");
+    code_.SetValue("OBJECT_TYPE", godot_type->constant);
+    code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
+
+    // Function Declaration
+    code_ += "static func pack(_fbb : FlatBufferBuilder, object : {{OBJECT_TYPE}} ) -> int:";
     code_.IncrementIdentLevel();
+    // create offset items, and store add functions for later.
+    std::vector<const FieldDef*> ordered_fields;
 
-    // All the non-inline objects need to be added to the builder before adding
-    // our object
+    // We loop down through sizes, from largest power of two to zero, or we do this once.
     for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2) {
+      // Loop through the fields from start to finish
       for (auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it) {
-        if (const auto &field = **it; !field.deprecated &&
-            (!struct_def.sortbysize || size == SizeOf(field.value.type.base_type))) {
-          Type field_type = field.value.type;
-          Type element_type;
-          code_.SetValue("FIELD_NAME", Name(field));
-          code_.SetValue("INCLUDE", "");
-
-          // Scalar | Struct | Fixed length Array
-          // These items are added inline in the table, and do not require
-          // creating an offset ahead of time.
-          if (IsScalar(field_type.base_type) || IsStruct(field_type)) continue;
-
-          if (IsTable(field_type)) {
-            code_.SetValue("FIELD_TYPE", GetGodotType(field_type));
-            code_.SetValue("INCLUDE", include_map[field_type.struct_def->file]);
-          }
-          if (IsSeries(field_type)) {
-            code_.SetValue("FIELD_TYPE", "Vector");
-            element_type = field_type.VectorType();
-            code_.SetValue("ELEMENT_TYPE", TypeName(element_type.base_type));
-            if (IsTable(element_type)) {
-              code_.SetValue("INCLUDE", include_map[element_type.struct_def->file]);
-              code_.SetValue("ELEMENT_TYPE", GetGodotType(element_type));
-            }
-          }
-
-          code_ += "# {{FIELD_NAME}} : {{FIELD_TYPE}} \\";
-          code_ += IsSeries(field_type) ? "of {{ELEMENT_TYPE}}" : "";
-
-          // Scalar | Struct | Fixed length Array
-          // These items are excluded from this step already
-          // Table
-          if (IsTable(field_type)) {
-            code_ += "var {{FIELD_NAME}}_offset : int = "
-                "{{INCLUDE}}Create{{FIELD_TYPE}}2( _fbb, object.{{FIELD_NAME}} );";
-          }
-          // TODO Union
-          else if (IsUnion(field_type)) {
-            code_ += "# TODO Union";
-            code_ += "var {{FIELD_NAME}}_offset : int";
-          }
-          // String
-          else if (IsString(field_type)) {
-            code_ += "var {{FIELD_NAME}}_offset : int = "
-                "_fbb.create_String( object.{{FIELD_NAME}} );";
-          }
-          // Vector of
-          else if (IsVector(field_type) && !IsUnion(element_type)) {
-            // Scalar
-            if (IsScalar(element_type.base_type)) {
-              code_.SetValue("TYPE_NAME", TypeName(element_type.base_type));
-              code_ += "var {{FIELD_NAME}}_offset : int = "
-                  "_fbb.create_vector_{{TYPE_NAME}}( object.{{FIELD_NAME}} )";
-            }
-            // TODO - Struct
-            else if (IsStruct(element_type)) {
-              code_ += "# TODO Vector of Struct";
-              code_ += "var {{FIELD_NAME}}_offset : int";
-            }
-            // Table
-            else if (IsTable(element_type)) {
-              code_ += "var {{FIELD_NAME}}_array : Array = object.{{FIELD_NAME}}";
-              code_ += "var {{FIELD_NAME}}_offsets : PackedInt32Array";
-              code_ += "{{FIELD_NAME}}_offsets.resize( {{FIELD_NAME}}_array.size() )";
-              code_ += "for index in {{FIELD_NAME}}_array.size():";
-              code_.IncrementIdentLevel();
-              code_ += "var item : Variant = {{FIELD_NAME}}_array[index]";
-              code_ += "{{FIELD_NAME}}_offsets[index] = "
-                  "{{INCLUDE}}Create{{ELEMENT_TYPE}}2( _fbb, item )";
-              code_.DecrementIdentLevel();
-              code_ += "var {{FIELD_NAME}}_offset : int = "
-                  "_fbb.create_vector_offset( {{FIELD_NAME}}_offsets )";
-            }
-            // String
-            else if (IsString(element_type)) {
-              code_ += "var {{FIELD_NAME}}_offset : int = "
-                  "_fbb.create_PackedStringArray( object.{{FIELD_NAME}} )";
-            }
-            // TODO - Vector
-            else if (IsVector(element_type)) {
-              code_ += "# TODO Vector of Vector";
-            } else {
-              code_ += "# TODO Vector of Unknown Type";
-              GenFieldDebug(field);
-            }
-          }
-          // TODO Vector of Union
-          else {
-            GenFieldDebug(field);
-          }
-          code_ += "";
-        }
+        const FieldDef *field = *it;
+        const Type *field_type = &field->value.type;
+        if( field->deprecated ) continue; // skip deprecated fields
+        // if we are sorting by size, skip fields that dont match the size,
+        // they will get done next size decrease.
+        if( struct_def.sortbysize && size != SizeOf(field->value.type.base_type) ){ continue; }
+        ordered_fields.push_back( field );
+        // nothing to do for scalar and struct types here.
+        if (IsScalar(field_type->base_type) || IsStruct(*field_type)){ continue; }
+        Type element_type;
+        code_.SetValue("FIELD_NAME", Name(*field));
+        code_.SetValue("INCLUDE", "");
+        code_.SetValue("FIELD_TYPE", GetGodotType(*field_type));
+        // tables and arrays, aka offset fields
+        code_ += "var {{FIELD_NAME}}_ofs : int = _fbb.create_{{FIELD_TYPE}}( object.{{FIELD_NAME}} )";
+        // TODO if this is not a builtin type then Pack will need to be called on it.
       }
     }
+    // Add scalar and inline objects
+    code_ += "var builder : {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb )";
+    for ( const auto field : ordered_fields ) {
+      const Type *field_type = &field->value.type;
+      code_.SetValue("FIELD_NAME", Name(*field));
+      code_.SetValue("INCLUDE", "");
+      code_.SetValue("FIELD_TYPE", GetGodotType(*field_type));
+      code_.SetValue("DEFAULT_VALUE", field->value.constant);
 
-    // Create* function body
-    code_ += "# build the {{STRUCT_NAME}}";
-    code_ += "var builder : {{STRUCT_NAME}}Builder = {{STRUCT_NAME}}Builder.new( _fbb )";
-    for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2) {
-      for (auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it) {
-        if (const auto &field = **it; !field.deprecated &&
-            (!struct_def.sortbysize || size == SizeOf(field.value.type.base_type))) {
-          code_.SetValue("FIELD_NAME", Name(field));
-
-          // Scalar | Struct | Fixed length Array
-          // These items are added inline in the table, and do not require
-          // creating an offset ahead of time.
-          if (Type field_type = field.value.type; IsScalar(field_type.base_type) ||
-                IsStruct(field_type)) {
-            code_ += "builder.add_{{FIELD_NAME}}( object.{{FIELD_NAME}} )";
-          } else {
-            code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_offset )";
-          }
-        }
+      if (IsScalar(field_type->base_type) || IsStruct(*field_type)) {
+        // scalar and structs aka inline fields
+        code_ += "builder.add_{{FIELD_NAME}}( object.{{FIELD_NAME}} )";
+      } else { // tables and arrays, aka offset fields
+        code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}}_ofs )";
       }
     }
     code_ += "return builder.finish();";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+
+    code_ += "static func unpack( _bytes : PackedByteArray, _start : int ) -> {{OBJECT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "var {{OBJECT_NAME}} : {{OBJECT_TYPE}} = {{OBJECT_TYPE}}.new()";
+    code_ += "unpack_to(_bytes, _start, {{OBJECT_NAME}} )";
+    code_ += "return {{OBJECT_NAME}}";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+
+    code_ += "static func unpack_to( _bytes : PackedByteArray, _start : int, object : {{OBJECT_TYPE}} ) -> void:";
+    code_.IncrementIdentLevel();
+    code_ += "var fbt : {{TABLE_NAME}} = {{TABLE_NAME}}.new(_bytes, _start)";
+    for ( const auto field : ordered_fields ) {
+      const Type *field_type = &field->value.type;
+      code_.SetValue("FIELD_NAME", Name(*field));
+      code_.SetValue("INCLUDE", "");
+      code_.SetValue("FIELD_TYPE", GetGodotType(*field_type));
+      code_.SetValue("DEFAULT_VALUE", field->value.constant);
+
+
+      code_ += "object.{{FIELD_NAME}} = fbt.{{FIELD_NAME}}()";
+    }
+    code_.DecrementIdentLevel();
+    code_ += "";
+
+  }
+
+  void GenUnPackObject(const StructDef &struct_def) {
+    // Generate The Object Based interface using the same function names as C++
+
+    // defined values: TABLE_NAME?
+    code_ += "# UnPack Object based API";
+    const Value *godot_type = struct_def.attributes.Lookup("godot_type");
+    code_.SetValue("OBJECT_TYPE", godot_type->constant);
+    code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
+
+    // Function Declaration
+    code_ += "static func unpack_{{TABLE_NAME}}(_bytes : PackedByteArray, _start : int, ) -> {{OBJECT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "return {{TABLE_NAME}}.unpack(_bytes, _start)";
     code_.DecrementIdentLevel();
     code_ += "";
   }
