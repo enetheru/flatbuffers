@@ -324,8 +324,6 @@ public:
       if (!struct_def->fixed && !struct_def->generated) {
         GenStructGet( *struct_def );
         GenTableCreate(*struct_def);
-        // FIXME put creation functions behind cmd line option
-        // GenCreateFunc2( struct_def );
       }
     }
 
@@ -333,6 +331,10 @@ public:
     if ( opts_.generate_object_based_api ) {
       for (const auto &struct_def : parser_.structs_.vec) {
         if (!struct_def->fixed && !struct_def->generated) {
+          const Value *godot_type = struct_def->attributes.Lookup("godot_type");
+          if ( godot_type == nullptr ) {continue;}
+          code_.SetValue("OBJECT_TYPE", godot_type->constant);
+          code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
           GenUnPackObject( *struct_def );
         }
       }
@@ -1993,7 +1995,10 @@ public:
       GenField(*field);
     }
 
-    if( opts_.generate_object_based_api ){
+    const Value *godot_type = struct_def.attributes.Lookup("godot_type");
+    if( opts_.generate_object_based_api && godot_type != nullptr ){
+      code_.SetValue("OBJECT_TYPE", godot_type->constant);
+      code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
       GenPackUnPack( struct_def );
     }
     if (opts_.gdscript_debug) { GenDebugDict(struct_def); }
@@ -2203,11 +2208,8 @@ public:
   ║|_| \__,_\__|_\_\ /_/    \___/|_||_|_| \__,_\__|_\_\
   ╙─────────────────────────────────────────────────────*/
   void GenPackUnPack(const StructDef &struct_def) {
-    // defined values: TABLE_NAME
+    // defined values: TABLE_NAME, OBJECT_TYPE, OBJECT_NAME
     code_ += "# Pack/UnPack Object based API";
-    const Value *godot_type = struct_def.attributes.Lookup("godot_type");
-    code_.SetValue("OBJECT_TYPE", godot_type->constant);
-    code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
 
     // Function Declaration
     code_ += "static func pack(_fbb : FlatBufferBuilder, object : {{OBJECT_TYPE}} ) -> int:";
@@ -2285,15 +2287,11 @@ public:
 
   }
 
+  // Generate The Object Based interface using the same function names as C++
   void GenUnPackObject(const StructDef &struct_def) {
-    // Generate The Object Based interface using the same function names as C++
-
-    // defined values: TABLE_NAME?
+    (void)struct_def;
+    // defined values: TABLE_NAME, OBJECT_TYPE, OBJECT_NAME
     code_ += "# UnPack Object based API";
-    const Value *godot_type = struct_def.attributes.Lookup("godot_type");
-    code_.SetValue("OBJECT_TYPE", godot_type->constant);
-    code_.SetValue("OBJECT_NAME", ConvertCase(godot_type->constant, Case::kAllLower) );
-
     // Function Declaration
     code_ += "static func unpack_{{TABLE_NAME}}(_bytes : PackedByteArray, _start : int, ) -> {{OBJECT_TYPE}}:";
     code_.IncrementIdentLevel();
