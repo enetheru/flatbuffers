@@ -1587,7 +1587,6 @@ public:
       code_ += "into.start = relative_offset";
       code_ += "return into";
       code_.DecrementIdentLevel();
-      code_ += "return _change_schema.get_ChangeFB( bytes, offset )";
       code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";;
     }
     code_.DecrementIdentLevel();
