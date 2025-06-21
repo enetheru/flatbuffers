@@ -509,7 +509,7 @@ public:
   ║ | |(_-< _ \ || | | |  _| | ' \
   ║|___/__/___/\_,_|_|_|\__|_|_||_|
   ╙────────────────────────────────*/
-  bool IsBuiltin(const Type &type) {
+  bool IsBuiltinStruct(const Type &type) {
     return type.struct_def != nullptr &&
            builtin_structs.find(type.struct_def->name) != builtin_structs.end();
 
@@ -605,7 +605,7 @@ public:
   std::string GetGodotType(const Type &type) {
     if (IsEnum(type)) { return EscapeKeyword(type.enum_def->name); }
     if (IsStruct(type) || IsTable(type)) {
-      if (IsBuiltin(type)) { return type.struct_def->name; }
+      if (IsBuiltinStruct(type)) { return type.struct_def->name; }
       return EscapeKeyword(type.struct_def->name);
     }
     if (IsSeries(type)) { return gdArrayType(type.element); }
@@ -1155,7 +1155,7 @@ public:
       code_ += "# TODO Scalar Type";
       code_ += "return bytes.slice({{OFFSET}}, \\";
       code_ += "{{OFFSET}} + {{FIXED_LENGTH}} * {{ELEMENT_SIZE}}).{{PBA_CONVERT}}()";
-    } else if ( IsBuiltin( element ) ) {
+    } else if ( IsBuiltinStruct( element ) ) {
       code_ += "# TODO Builtin Type";
       code_ += "return []";
     } else if ( IsStruct(element) ) {
@@ -1179,7 +1179,7 @@ public:
     code_.IncrementIdentLevel();
     if ( IsScalar( element.base_type  )) {
       code_ += "# TODO Scalar Type";
-    } else if ( IsBuiltin( element ) ) {
+    } else if ( IsBuiltinStruct( element ) ) {
       code_ += "# TODO Builtin Type";
     } else if ( IsStruct(element) ) {
       code_ += "# TODO Struct Type";
@@ -1203,7 +1203,7 @@ public:
     if ( IsScalar( element.base_type  )) {
       code_.SetValue("PBA_SUFFIX", gdPBASuffix(element.base_type));
       code_ += "return bytes.decode_{{PBA_SUFFIX}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
-    } else if ( IsBuiltin( element ) ) {
+    } else if ( IsBuiltinStruct( element ) ) {
       code_ += "return bytes.decode_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else if ( IsStruct(element) ) {
       code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
@@ -1307,7 +1307,7 @@ public:
         code_ += "set(v): bytes.encode_{{PBASUFFIX}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
-      } else if (IsStruct(type) && IsBuiltin(type)) {
+      } else if (IsStruct(type) && IsBuiltinStruct(type)) {
         code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return decode_{{GODOT_TYPE}}(start + {{OFFSET}})";
@@ -1544,7 +1544,7 @@ public:
     code_ += "for i : int in array_size:";
     code_.IncrementIdentLevel();
 
-    if (IsBuiltin(element)) {
+    if (IsBuiltinStruct(element)) {
       code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
     } else {
       code_ +=
@@ -1562,8 +1562,14 @@ public:
   void GenFieldVectorStructAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    const bool is_builtin_sruct = IsBuiltinStruct(field.value.type.VectorType());
 
-    code_ += "func {{FIELD_NAME}}_at( idx : int ) -> {{ELEMENT_TYPE}}:";
+    if( is_builtin_sruct ) {
+      // TODO research whether default values for structs is viable?
+      code_ += "func {{FIELD_NAME}}_at( idx : int ) -> {{ELEMENT_TYPE}}:";
+    } else {
+      code_ += "func {{FIELD_NAME}}_at( idx : int, into : {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
+    }
     code_.IncrementIdentLevel();
     code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "var array_size : int = bytes.decode_u32( field_start )";
@@ -1572,10 +1578,17 @@ public:
     code_ += "assert( idx < array_size, 'index is out of bounds')";
     code_ += "var relative_offset : int = array_start + idx * 4";
     code_ += "var offset : int = relative_offset + bytes.decode_u32( relative_offset )";
-    if ( IsBuiltin(field.value.type.VectorType() ) ) {
+    if ( is_builtin_sruct ) {
       code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
     }else {
-      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";
+      code_ += "if into:";
+      code_.IncrementIdentLevel();
+      code_ += "into.bytes = bytes";
+      code_ += "into.start = relative_offset";
+      code_ += "return into";
+      code_.DecrementIdentLevel();
+      code_ += "return _change_schema.get_ChangeFB( bytes, offset )";
+      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";;
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1608,7 +1621,7 @@ public:
     code_ += "for i : int in array_size:";
     code_.IncrementIdentLevel();
     code_ += "var p : int = array_start + i * 4";
-    if (IsBuiltin(element)) {
+    if (IsBuiltinStruct(element)) {
       code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
     } else {
       code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, p + bytes.decode_u32( p ) )";
@@ -1793,7 +1806,7 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    if (IsBuiltin(type)) {
+    if (IsBuiltinStruct(type)) {
       code_ += "return get_{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
     } else {
       code_.SetValue("INCLUDE", GetInclude(type));
@@ -1819,7 +1832,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
-    if (IsBuiltin(type)) {
+    if (IsBuiltinStruct(type)) {
       code_ += "return decode_{{GODOT_TYPE}}( field_start )";
     } else {
       code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
@@ -1872,7 +1885,7 @@ public:
       code_.SetValue("GODOT_TYPE", GetGodotType(val->union_type));
       code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
       code_.IncrementIdentLevel();
-      if (IsBuiltin(type)) {
+      if (IsBuiltinStruct(type)) {
         code_ += "return decode_{{GODOT_TYPE}}( field_start )";
       } else {
         code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
@@ -2077,7 +2090,7 @@ public:
         code_ += "fbb_.add_element_{{TYPE_NAME}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
       }
       else if (IsStruct(type)) {
-        if (IsBuiltin(type)) {
+        if (IsBuiltinStruct(type)) {
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         } else {
           code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
