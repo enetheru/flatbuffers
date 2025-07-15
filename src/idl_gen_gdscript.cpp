@@ -283,7 +283,7 @@ public:
     // having to pass its position
     if (const auto &include_ident = include_map[parser_.root_struct_def_->file];
         include_ident.length() > 0) {
-      code_.SetValue("INCLUDE_IDENT", include_ident + ".");
+      code_.SetValue("INCLUDE_IDENT", include_ident + "_schema.");
     } else {
       code_.SetValue("INCLUDE_IDENT", "");
     }
@@ -2242,7 +2242,6 @@ public:
         ordered_fields.push_back( field );
         // nothing to do for scalar and struct types here.
         if (IsScalar(field_type->base_type) || IsStruct(*field_type)){ continue; }
-        Type element_type;
         code_.SetValue("FIELD_NAME", Name(*field));
         code_.SetValue("INCLUDE", "");
         code_.SetValue("FIELD_TYPE", GetGodotType(*field_type));
