@@ -4,7 +4,7 @@
 # FetchContent (https://cmake.org/cmake/help/latest/module/FetchContent.html) to
 # grab the dependencies at config time. This requires CMake 3.14 or higher.
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.10)
 include(FetchContent)
 
 # No particular reason for the specific GIT_TAGs for the following repos, they
@@ -12,15 +12,15 @@ include(FetchContent)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        e2239ee6043f73722e7aa812a459f54a28552929 # release-1.11.0
+        GIT_TAG main
 )
 FetchContent_Declare(
     googlebenchmark
     GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG        0d98dba29d66e93259db7daa53a9327df767a415 # v1.6.1
+        GIT_TAG main
 )
 
-# For Windows: Prevent overriding the parent project's compiler/linker 
+# For Windows: Prevent overriding the parent project's compiler/linker
 # settings.
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(
@@ -47,12 +47,12 @@ set(FlatBenchmark_SRCS
 # correct times.
 add_custom_command(
     OUTPUT ${CPP_BENCH_FB_GEN}
-    COMMAND 
+    COMMAND
         "${FLATBUFFERS_FLATC_EXECUTABLE}"
         --cpp
         -o ${CPP_FB_BENCH_DIR}
         ${CPP_BENCH_FBS}
-    DEPENDS 
+    DEPENDS
         flatc
         flatbuffers
         ${CPP_BENCH_FBS}
@@ -62,7 +62,7 @@ add_custom_command(
 # The main flatbuffers benchmark executable
 add_executable(flatbenchmark ${FlatBenchmark_SRCS})
 
-# Benchmark requires C++11 
+# Benchmark requires C++11
 target_compile_features(flatbenchmark PRIVATE
     cxx_std_11 # requires cmake 3.8
 )
@@ -74,8 +74,8 @@ target_compile_options(flatbenchmark
 )
 
 # Set the output directory to the root binary directory
-set_target_properties(flatbenchmark 
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY 
+set_target_properties(flatbenchmark
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_BINARY_DIR}"
 )
 
@@ -83,6 +83,6 @@ set_target_properties(flatbenchmark
 target_include_directories(flatbenchmark PUBLIC ${CMAKE_SOURCE_DIR})
 
 target_link_libraries(flatbenchmark PRIVATE
-    benchmark::benchmark_main # _main to use their entry point 
+    benchmark::benchmark_main # _main to use their entry point
     gtest # Link to gtest so we can also assert in the benchmarks
 )
