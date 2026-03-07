@@ -292,7 +292,7 @@ public:
             code_.SetValue("INCLUDE_IDENT", "");
           }
       code_.SetValue("ROOT_STRUCT", EscapeKeyword(parser_.root_struct_def_->name));
-      code_ += "static func get_root( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+      code_ += "static func get_root( _bytes: PackedByteArray ) -> {{ROOT_STRUCT}}:";
       code_.IncrementIdentLevel();
       code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
       code_.DecrementIdentLevel();
@@ -438,7 +438,7 @@ public:
         auto inc = include_fast.find(def->file);
         if ( inc == include_fast.end() ) {
           printf("Error: Failed to match 'def->file' to an include\n");
-          printf("\t%s : %s\n", def->name.c_str(), def->file.c_str());
+          printf("\t%s: %s\n", def->name.c_str(), def->file.c_str());
           continue;
         }
         // Add the mapping.
@@ -652,7 +652,7 @@ public:
     // Generate Pretty Printer
     code_ += "func debug() -> Dictionary:";
     code_.IncrementIdentLevel();
-    code_ += "var d : Dictionary = {}";
+    code_ += "var d: Dictionary = {}";
     code_ += "d['buffer_size'] = bytes.size()";
     code_ += "d['start'] = start";
 
@@ -666,10 +666,10 @@ public:
       code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start )";
       code_ += "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 )";
       code_ += "";
-      code_ += "for i : int in ((d.vtable.vtable_bytes / 2) - 2):";
+      code_ += "for i: int in ((d.vtable.vtable_bytes / 2) - 2):";
       code_.IncrementIdentLevel();
-      code_ += "var keys : Array = vtable.keys()";
-      code_ += "var offsets : Array = vtable.values()";
+      code_ += "var keys: Array = vtable.keys()";
+      code_ += "var offsets: Array = vtable.values()";
       code_ += "d.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] )";
       code_.DecrementIdentLevel();
       code_ += "";
@@ -692,11 +692,11 @@ public:
       code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
 
       code_ += "# {{FIELD_NAME}}:{{FIELD_TYPE}} \\";
-      code_ += field->IsRequired() ? "(required)" : "";
+      code_ += field->IsRequired() ? "(required)": "";
 
       // Field Types:
       code_.SetValue("DICT", Name(*field) + "_dict");
-      code_ += "var {{DICT}} : Dictionary = {'type':'{{FIELD_TYPE}}'}";
+      code_ += "var {{DICT}}: Dictionary = {'type':'{{FIELD_TYPE}}'}";
       code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
 
       if (!struct_def.fixed) {
@@ -740,7 +740,7 @@ public:
           code_ += "{{DICT}}['value'] = 'FIXME, Packed type arrays break what was here.'";
           // code_ += "{{DICT}}['value'] = {{FIELD_NAME}}().map(";
           // code_.IncrementIdentLevel();
-          // code_ += "func( element : FlatBuffer ) -> Dictionary:";
+          // code_ += "func( element: FlatBuffer ) -> Dictionary:";
           // code_.IncrementIdentLevel();
           // code_ += "\treturn element.debug() if element else null";
           // code_.DecrementIdentLevel();
@@ -758,7 +758,7 @@ public:
       // TODO * Fixed length Array
 
       if (!struct_def.fixed) {
-        // Come back down after : if {{FIELD_NAME}}_is_present():
+        // Come back down after: if {{FIELD_NAME}}_is_present():
         code_.DecrementIdentLevel();
         code_ += "";
       }
@@ -1078,7 +1078,7 @@ public:
   ╙────────────────────────────────────────────────────*/
   void GenStructGet(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_ += "static func get_{{STRUCT_NAME}}( _bytes : PackedByteArray, _start : int = 0 ) -> {{STRUCT_NAME}}:";
+    code_ += "static func get_{{STRUCT_NAME}}( _bytes: PackedByteArray, _start: int = 0 ) -> {{STRUCT_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "assert(not _bytes.is_empty())";
     code_ += "return {{STRUCT_NAME}}.new(_bytes, _start)";
@@ -1107,7 +1107,7 @@ public:
       code_.SetValue("DEFAULT_VALUE", "default");
       code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
       code_.SetValue("PARAM_TYPE", GetGodotType(type));
-      code_ += "_{{PARAM_NAME}} : {{INCLUDE}}{{PARAM_TYPE}}\\";
+      code_ += "_{{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}}\\";
       // TODO add default value if possible.
       add_sep = true;
     }
@@ -1115,7 +1115,7 @@ public:
     code_.DecrementIdentLevel();
 
     // Allocate the memory required.
-    code_ += "var val : {{STRUCT_NAME}} = {{STRUCT_NAME}}.new()";
+    code_ += "var val: {{STRUCT_NAME}} = {{STRUCT_NAME}}.new()";
 
     // for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) :
     // 1; size; size /= 2 ) {
@@ -1188,7 +1188,7 @@ public:
     // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX, FIXED_LENGTH
     const Type element = field.value.type.VectorType();
-    code_ += "func set_{{FIELD_NAME}}( _v : {{GODOT_TYPE}} ):";
+    code_ += "func set_{{FIELD_NAME}}( _v: {{GODOT_TYPE}} ):";
     code_.IncrementIdentLevel();
     if ( IsScalar( element.base_type  )) {
       code_ += "# TODO Scalar Type";
@@ -1210,7 +1210,7 @@ public:
     // STRUCT_NAME, NUM_BYTES, FIELD_NAME, OFFSET, GODOT_TYPE, INCLUDE
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX, FIXED_LENGTH
     const Type element = field.value.type.VectorType();
-    code_ += "func at_{{FIELD_NAME}}( idx : int ) -> {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}:";
+    code_ += "func at_{{FIELD_NAME}}( idx: int ) -> {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "assert( idx < {{FIXED_LENGTH}})";
     if ( IsScalar( element.base_type  )) {
@@ -1236,7 +1236,7 @@ public:
   ╙──────────────────────────────────────────────────────*/
   // Init function to prevent a rather spicy footgun
   void GenStructInit(const StructDef &struct_def[[maybe_unused]]) {
-    code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
+    code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "if bytes_.is_empty(): ";
     code_.IncrementIdentLevel();
@@ -1292,7 +1292,7 @@ public:
     GenStructIncludes( struct_def );
 
     // Add the fixed size
-    code_ += "const size : int = {{NUM_BYTES}}";
+    code_ += "const size: int = {{NUM_BYTES}}";
     code_ += "";
 
     // Init function to prevent a rather spicy footgun
@@ -1313,7 +1313,7 @@ public:
       code_ += "# [================[ {{FIELD_NAME}} ]================]";
       if (field->IsScalar()) {
         code_.SetValue("PBASUFFIX", gdPBASuffix(type.base_type));
-        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return bytes.decode_{{PBASUFFIX}}(start + {{OFFSET}})\\";
         code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
@@ -1321,14 +1321,14 @@ public:
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type) && IsBuiltinStruct(type)) {
-        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return decode_{{GODOT_TYPE}}(start + {{OFFSET}})";
         code_ += "set(v): encode_{{GODOT_TYPE}}(start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type)) {
-        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return {{INCLUDE}}get_{{GODOT_TYPE}}(bytes, start + {{OFFSET}})";
         code_ += "set(v): overwrite_bytes(v.bytes, v.start, start + {{OFFSET}}, v.size)";
@@ -1342,7 +1342,7 @@ public:
         code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
         code_.SetValue("ELEMENT_SIZE", NumToString(InlineSize(element) ));
 
-        code_ += "var {{FIELD_NAME}} : {{GODOT_TYPE}} :";
+        code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get = get_{{FIELD_NAME}}, set = set_{{FIELD_NAME}}";
         code_.DecrementIdentLevel();
@@ -1430,9 +1430,9 @@ public:
 
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
     switch (element.base_type) {
       case BASE_TYPE_UTYPE:
@@ -1447,9 +1447,9 @@ public:
       case BASE_TYPE_USHORT:
       case BASE_TYPE_UINT:
       case BASE_TYPE_ULONG:
-        code_ += "var array : Array";
+        code_ += "var array: Array";
         code_ += "if array.resize( array_size ) != OK: return []";
-        code_ += "for i : int in array_size:";
+        code_ += "for i: int in array_size:";
         code_.IncrementIdentLevel();
         code_ += "array[i] = bytes.decode_{{PBASUFFIX}}( array_start + i * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
@@ -1463,7 +1463,7 @@ public:
       case BASE_TYPE_FLOAT:
       case BASE_TYPE_DOUBLE:
         code_.SetValue("PBA_CONVERT", gdPBAConvert(element.base_type));
-        code_ += "var array_end : int = array_start + array_size * {{ELEMENT_SIZE}}";
+        code_ += "var array_end: int = array_start + array_size * {{ELEMENT_SIZE}}";
         code_ += "return bytes.slice( array_start, array_end ).{{PBA_CONVERT}}()";
         code_.DecrementIdentLevel();
         code_ += "";
@@ -1482,13 +1482,13 @@ public:
     const auto &type = field.value.type;
     const Type element = type.VectorType();
 
-    code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+    code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     switch (element.base_type) {
       case BASE_TYPE_UTYPE:
       case BASE_TYPE_BOOL:
       case BASE_TYPE_UCHAR:
-        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
         code_ += "return bytes[array_start + index]";
@@ -1500,7 +1500,7 @@ public:
       case BASE_TYPE_USHORT:
       case BASE_TYPE_UINT:
       case BASE_TYPE_ULONG:
-        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
         code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
@@ -1511,7 +1511,7 @@ public:
       case BASE_TYPE_LONG:
       case BASE_TYPE_FLOAT:
       case BASE_TYPE_DOUBLE:
-        code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
         code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
@@ -1548,13 +1548,13 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
 
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
-    code_ += "var array : {{GODOT_TYPE}}";
+    code_ += "var array: {{GODOT_TYPE}}";
     code_ += "if array.resize( array_size ) != OK: return []";
-    code_ += "for i : int in array_size:";
+    code_ += "for i: int in array_size:";
     code_.IncrementIdentLevel();
 
     if (IsBuiltinStruct(element)) {
@@ -1579,18 +1579,18 @@ public:
 
     if( is_builtin_sruct ) {
       // TODO research whether default values for structs is viable?
-      code_ += "func {{FIELD_NAME}}_at( idx : int ) -> {{ELEMENT_TYPE}}:";
+      code_ += "func {{FIELD_NAME}}_at( idx: int ) -> {{ELEMENT_TYPE}}:";
     } else {
-      code_ += "func {{FIELD_NAME}}_at( idx : int, into : {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
+      code_ += "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
     }
     code_.IncrementIdentLevel();
-    code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
-    code_ += "var array_size : int = bytes.decode_u32( field_start )";
-    code_ += "var array_start : int = field_start + 4";
+    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_size: int = bytes.decode_u32( field_start )";
+    code_ += "var array_start: int = field_start + 4";
     code_ += "assert(field_start, 'Field is not present in buffer' )";
     code_ += "assert( idx < array_size, 'index is out of bounds')";
-    code_ += "var relative_offset : int = array_start + idx * 4";
-    code_ += "var offset : int = relative_offset + bytes.decode_u32( relative_offset )";
+    code_ += "var relative_offset: int = array_start + idx * 4";
+    code_ += "var offset: int = relative_offset + bytes.decode_u32( relative_offset )";
     if ( is_builtin_sruct ) {
       code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
     }else {
@@ -1624,15 +1624,15 @@ public:
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
-    code_ += "var array : Array";
+    code_ += "var array: Array";
     code_ += "if array.resize( array_size ) != OK: return []";
-    code_ += "for i : int in array_size:";
+    code_ += "for i: int in array_size:";
     code_.IncrementIdentLevel();
-    code_ += "var p : int = array_start + i * 4";
+    code_ += "var p: int = array_start + i * 4";
     if (IsBuiltinStruct(element)) {
       code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
     } else {
@@ -1657,16 +1657,16 @@ public:
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size : int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
-    code_ += "var array : {{GODOT_TYPE}}";
+    code_ += "var array: {{GODOT_TYPE}}";
     code_ += "if array.resize( array_size ) != OK: return []";
-    code_ += "for i : int in array_size:";
+    code_ += "for i: int in array_size:";
     code_.IncrementIdentLevel();
-    code_ += "var idx : int = array_start + i * {{ELEMENT_SIZE}}";
-    code_ += "var element_start : int = idx + bytes.decode_u32( idx )";
+    code_ += "var idx: int = array_start + i * {{ELEMENT_SIZE}}";
+    code_ += "var element_start: int = idx + bytes.decode_u32( idx )";
     code_ += "array[i] = decode_String( element_start )";
     code_.DecrementIdentLevel();
     code_ += "return array";
@@ -1677,12 +1677,12 @@ public:
   void GenFieldVectorStringAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
-    code_ += "func {{FIELD_NAME}}_at( index : int ) -> {{ELEMENT_TYPE}}:";
+    code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return ''";
     code_ += "array_start += 4";
-    code_ += "var string_start : int = array_start + index * {{ELEMENT_SIZE}}";
+    code_ += "var string_start: int = array_start + index * {{ELEMENT_SIZE}}";
     code_ += "string_start += bytes.decode_u32( string_start )";
     code_ += "return decode_String( string_start )";
     code_.DecrementIdentLevel();
@@ -1699,7 +1699,7 @@ public:
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionGet ";
-    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
     code_ += "";
     if (opts_.gdscript_debug) {
       GenFieldDebug(field);
@@ -1710,7 +1710,7 @@ public:
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "# TODO GenFieldVectorUnionAt ";
-    code_ += "# {{FIELD_NAME}} : {{GODOT_TYPE}} ";
+    code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
     code_ += "";
     if (opts_.gdscript_debug) {
       GenFieldDebug(field);
@@ -1728,7 +1728,7 @@ public:
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return 0";
     code_ += "return bytes.decode_u32( array_start )";
     code_.DecrementIdentLevel();
@@ -1800,7 +1800,7 @@ public:
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var foffset : int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant;
     code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset )";
     code_.DecrementIdentLevel();
@@ -1822,7 +1822,7 @@ public:
       code_ += "return get_{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
     } else {
       code_.SetValue("INCLUDE", GetInclude(type));
-      code_ += "var field_offset : int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+      code_ += "var field_offset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
       code_ += "if not field_offset: return null";
       code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, start + field_offset )";
     }
@@ -1842,7 +1842,7 @@ public:
     code_.SetValue("INCLUDE", GetInclude(type));
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
     if (IsBuiltinStruct(type)) {
       code_ += "return decode_{{GODOT_TYPE}}( field_start )";
@@ -1859,7 +1859,7 @@ public:
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var foffset : int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant + " as {{GODOT_TYPE}}";
     code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset ) as {{GODOT_TYPE}}";
     code_.DecrementIdentLevel();
@@ -1885,7 +1885,7 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_.SetValue("INCLUDE", GetInclude(type));
-    code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
     // match the type
     code_ += "match( {{FIELD_NAME}}_type() ):";
@@ -1921,7 +1921,7 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start : int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not field_start: return ''";
     code_ += "return decode_String( field_start )";
     code_.DecrementIdentLevel();
@@ -1961,7 +1961,7 @@ public:
 
   // Init function to prevent a rather spicy footgun
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
-    code_ += "func _init( bytes_ : PackedByteArray = [], start_ : int = 0) -> void:";
+    code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "bytes = bytes_; start = start_";
     code_.DecrementIdentLevel();
@@ -2045,11 +2045,11 @@ public:
     code_ += "class {{STRUCT_NAME}}Builder extends RefCounted:";
     code_.IncrementIdentLevel();
     code_ += "var fbb_: FlatBufferBuilder";
-    code_ += "var start_ : int";
+    code_ += "var start_: int";
     code_ += "";
 
     // Add init function
-    code_ += "func _init( _fbb : FlatBufferBuilder ) -> void:";
+    code_ += "func _init( _fbb: FlatBufferBuilder ) -> void:";
     code_.IncrementIdentLevel();
     code_ += "fbb_ = _fbb";
     code_ += "start_ = _fbb.start_table()";
@@ -2079,7 +2079,7 @@ public:
       code_.SetValue("VALUE_DEFAULT", is_default_scalar ? field->value.constant : "");
 
       // Function Signature
-      code_ += "func add_{{FIELD_NAME}}( {{PARAM_NAME}} : {{INCLUDE}}{{PARAM_TYPE}} ) -> void:";
+      code_ += "func add_{{FIELD_NAME}}( {{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}} ) -> void:";
       code_.IncrementIdentLevel();
 
       // Seems the ordering here is important, because a scalar value can also be a union or enum type.
@@ -2134,8 +2134,8 @@ public:
     // ---------------------
     code_ += "func finish() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "var end : int = fbb_.end_table( start_ )";
-    code_ += "var o : int = end";
+    code_ += "var end: int = fbb_.end_table( start_ )";
+    code_ += "var o: int = end";
 
     for (const auto &field : struct_def.fields.vec) {
       if (!field->deprecated && field->IsRequired()) {
@@ -2163,7 +2163,7 @@ public:
     // to create a table in one go.
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
-    code_ += "static func create_{{TABLE_NAME}}( _fbb : FlatBufferBuilder,";
+    code_ += "static func create_{{TABLE_NAME}}( _fbb: FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
     code_.SetValue("SEP", ",");
@@ -2186,7 +2186,7 @@ public:
       } else {
         code_.SetValue("PARAM_TYPE", "int");
       }
-      code_ += "{{PARAM_NAME}} : {{INCLUDE}}{{PARAM_TYPE}}\\";
+      code_ += "{{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}}\\";
       // TODO add default value if possible.
       add_sep = true;
     }
@@ -2210,7 +2210,7 @@ public:
     // }
 
     // Create* function body
-    code_ += "var builder : {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb );";
+    code_ += "var builder: {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb );";
     for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1; size; size /= 2) {
       for (auto it = struct_def.fields.vec.rbegin(); it != struct_def.fields.vec.rend(); ++it) {
         if (const auto &field = **it; !field.deprecated &&
@@ -2237,7 +2237,7 @@ public:
     code_ += "# Pack/UnPack Object based API";
 
     // Function Declaration
-    code_ += "static func pack(_fbb : FlatBufferBuilder, object : {{OBJECT_TYPE}} ) -> int:";
+    code_ += "static func pack(_fbb: FlatBufferBuilder, object: {{OBJECT_TYPE}} ) -> int:";
     code_.IncrementIdentLevel();
     // create offset items, and store add functions for later.
     std::vector<const FieldDef*> ordered_fields;
@@ -2259,12 +2259,12 @@ public:
         code_.SetValue("INCLUDE", "");
         code_.SetValue("FIELD_TYPE", GetGodotType(*field_type));
         // tables and arrays, aka offset fields
-        code_ += "var {{FIELD_NAME}}_ofs : int = _fbb.create_{{FIELD_TYPE}}( object.{{FIELD_NAME}} )";
+        code_ += "var {{FIELD_NAME}}_ofs: int = _fbb.create_{{FIELD_TYPE}}( object.{{FIELD_NAME}} )";
         // TODO if this is not a builtin type then Pack will need to be called on it.
       }
     }
     // Add scalar and inline objects
-    code_ += "var builder : {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb )";
+    code_ += "var builder: {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb )";
     for ( const auto field : ordered_fields ) {
       const Type *field_type = &field->value.type;
       code_.SetValue("FIELD_NAME", Name(*field));
@@ -2284,18 +2284,18 @@ public:
     code_ += "";
 
 
-    code_ += "static func unpack( _bytes : PackedByteArray, _start : int ) -> {{OBJECT_TYPE}}:";
+    code_ += "static func unpack( _bytes: PackedByteArray, _start: int ) -> {{OBJECT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var {{OBJECT_NAME}} : {{OBJECT_TYPE}} = {{OBJECT_TYPE}}.new()";
+    code_ += "var {{OBJECT_NAME}}: {{OBJECT_TYPE}} = {{OBJECT_TYPE}}.new()";
     code_ += "unpack_to(_bytes, _start, {{OBJECT_NAME}} )";
     code_ += "return {{OBJECT_NAME}}";
     code_.DecrementIdentLevel();
     code_ += "";
 
 
-    code_ += "static func unpack_to( _bytes : PackedByteArray, _start : int, object : {{OBJECT_TYPE}} ) -> void:";
+    code_ += "static func unpack_to( _bytes: PackedByteArray, _start: int, object: {{OBJECT_TYPE}} ) -> void:";
     code_.IncrementIdentLevel();
-    code_ += "var fbt : {{TABLE_NAME}} = {{TABLE_NAME}}.new(_bytes, _start)";
+    code_ += "var fbt: {{TABLE_NAME}} = {{TABLE_NAME}}.new(_bytes, _start)";
     for ( const auto field : ordered_fields ) {
       const Type *field_type = &field->value.type;
       code_.SetValue("FIELD_NAME", Name(*field));
@@ -2317,7 +2317,7 @@ public:
     // defined values: TABLE_NAME, OBJECT_TYPE, OBJECT_NAME
     code_ += "# UnPack Object based API";
     // Function Declaration
-    code_ += "static func unpack_{{TABLE_NAME}}(_bytes : PackedByteArray, _start : int, ) -> {{OBJECT_TYPE}}:";
+    code_ += "static func unpack_{{TABLE_NAME}}(_bytes: PackedByteArray, _start: int, ) -> {{OBJECT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "return {{TABLE_NAME}}.unpack(_bytes, _start)";
     code_.DecrementIdentLevel();
