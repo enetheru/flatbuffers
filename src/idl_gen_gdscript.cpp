@@ -195,7 +195,8 @@ public:
       "Color", "Vector2", "Vector3", "Vector4", nullptr
     };
 
-    static constexpr const char *my_keywords[] = { "bytes", "start", nullptr };
+    // The FlatBuffers Godot Class needs to contain these two elements to hold the data
+    static constexpr const char *my_keywords[] = { "_fb_bytes", "_fb_start", nullptr };
 
     for (auto kw = godot_structs; *kw; kw++) keywords.insert(*kw);
     for (auto kw = godot_stringlike; *kw; kw++) keywords.insert(*kw);
@@ -653,24 +654,24 @@ public:
     code_ += "func debug() -> Dictionary:";
     code_.IncrementIdentLevel();
     code_ += "var d: Dictionary = {}";
-    code_ += "d['buffer_size'] = bytes.size()";
-    code_ += "d['start'] = start";
+    code_ += "d['buffer_size'] = _fb_bytes.size()";
+    code_ += "d['start'] = _fb_start";
 
     // IF we are a table, then we have a vtable.
     if (struct_def.fixed) {  // Then we are a struct
       code_ += "d[{{FIELD_NAME}}] = {{FIELD_NAME}}()";
     } else {
-      code_ += "d['vtable_offset'] = bytes.decode_s32( start )";
+      code_ += "d['vtable_offset'] = _fb_bytes.decode_s32( _fb_start )";
       code_ += "d['vtable_start'] = d.start - d.vtable_offset";
       code_ += "d['vtable'] = Dictionary()";
-      code_ += "d.vtable['vtable_bytes'] = bytes.decode_u16( d.vtable_start )";
-      code_ += "d.vtable['table_size'] = bytes.decode_u16( d.vtable_start + 2 )";
+      code_ += "d.vtable['vtable_bytes'] = _fb_bytes.decode_u16( d.vtable_start )";
+      code_ += "d.vtable['table_size'] = _fb_bytes.decode_u16( d.vtable_start + 2 )";
       code_ += "";
       code_ += "for i: int in ((d.vtable.vtable_bytes / 2) - 2):";
       code_.IncrementIdentLevel();
       code_ += "var keys: Array = vtable.keys()";
       code_ += "var offsets: Array = vtable.values()";
-      code_ += "d.vtable[keys[i]] = bytes.decode_u16( d.vtable_start + offsets[i] )";
+      code_ += "d.vtable[keys[i]] = _fb_bytes.decode_u16( d.vtable_start + offsets[i] )";
       code_.DecrementIdentLevel();
       code_ += "";
     }
@@ -729,7 +730,7 @@ public:
       else if (IsVector(field_type)) {
         code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
         code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ += "{{DICT}}['size'] = bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
+        code_ += "{{DICT}}['size'] = _fb_bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
         // Scalar
         if (IsScalar(field_type.element)) {
           code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
@@ -1166,7 +1167,7 @@ public:
     if ( IsScalar( element.base_type  )) {
       code_.SetValue("PBA_CONVERT", gdPBAConvert(element.base_type));
       code_ += "# TODO Scalar Type";
-      code_ += "return bytes.slice({{OFFSET}}, \\";
+      code_ += "return _fb_bytes.slice({{OFFSET}}, \\";
       code_ += "{{OFFSET}} + {{FIXED_LENGTH}} * {{ELEMENT_SIZE}}).{{PBA_CONVERT}}()";
     } else if ( IsBuiltinStruct( element ) ) {
       code_ += "# TODO Builtin Type";
@@ -1215,11 +1216,11 @@ public:
     code_ += "assert( idx < {{FIXED_LENGTH}})";
     if ( IsScalar( element.base_type  )) {
       code_.SetValue("PBA_SUFFIX", gdPBASuffix(element.base_type));
-      code_ += "return bytes.decode_{{PBA_SUFFIX}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+      code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else if ( IsBuiltinStruct( element ) ) {
-      code_ += "return bytes.decode_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+      code_ += "return _fb_bytes.decode_{{ELEMENT_TYPE}}( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else if ( IsStruct(element) ) {
-      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else {
       code_ += "return null";
       code_ += "# FIXME Unknown Type";
@@ -1240,13 +1241,13 @@ public:
     code_.IncrementIdentLevel();
     code_ += "if bytes_.is_empty(): ";
     code_.IncrementIdentLevel();
-    code_ += "bytes = PackedByteArray()";
-    code_ += "bytes.resize( size )";
+    code_ += "_fb_bytes = PackedByteArray()";
+    code_ += "_fb_bytes.resize( size )";
     code_.DecrementIdentLevel();
     code_ += "else:";
     code_.IncrementIdentLevel();
     code_ += "assert(start_ + size <= bytes_.size())";
-    code_ += "bytes = bytes_; start = start_";
+    code_ += "_fb_bytes = bytes_; _fb_start = start_";
     code_.DecrementIdentLevel();
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1315,23 +1316,23 @@ public:
         code_.SetValue("PBASUFFIX", gdPBASuffix(type.base_type));
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return bytes.decode_{{PBASUFFIX}}(start + {{OFFSET}})\\";
+        code_ += "get(): return _fb_bytes.decode_{{PBASUFFIX}}(_fb_start + {{OFFSET}})\\";
         code_ += IsEnum(type) ? " as {{GODOT_TYPE}}" : "";
-        code_ += "set(v): bytes.encode_{{PBASUFFIX}}(start + {{OFFSET}}, v)";
+        code_ += "set(v): _fb_bytes.encode_{{PBASUFFIX}}(_fb_start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type) && IsBuiltinStruct(type)) {
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return decode_{{GODOT_TYPE}}(start + {{OFFSET}})";
-        code_ += "set(v): encode_{{GODOT_TYPE}}(start + {{OFFSET}}, v)";
+        code_ += "get(): return decode_{{GODOT_TYPE}}(_fb_start + {{OFFSET}})";
+        code_ += "set(v): encode_{{GODOT_TYPE}}(_fb_start + {{OFFSET}}, v)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type)) {
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return {{INCLUDE}}get_{{GODOT_TYPE}}(bytes, start + {{OFFSET}})";
-        code_ += "set(v): overwrite_bytes(v.bytes, v.start, start + {{OFFSET}}, v.size)";
+        code_ += "get(): return {{INCLUDE}}get_{{GODOT_TYPE}}(_fb_bytes, _fb_start + {{OFFSET}})";
+        code_ += "set(v): overwrite_bytes(v.bytes, v.start, _fb_start + {{OFFSET}}, v.size)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsArray(type)){
@@ -1432,13 +1433,13 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size: int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
     switch (element.base_type) {
       case BASE_TYPE_UTYPE:
       case BASE_TYPE_BOOL:
       case BASE_TYPE_UCHAR:
-        code_ += "return bytes.slice( array_start, array_start + array_size )";
+        code_ += "return _fb_bytes.slice( array_start, array_start + array_size )";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1451,7 +1452,7 @@ public:
         code_ += "if array.resize( array_size ) != OK: return []";
         code_ += "for i: int in array_size:";
         code_.IncrementIdentLevel();
-        code_ += "array[i] = bytes.decode_{{PBASUFFIX}}( array_start + i * {{ELEMENT_SIZE}})";
+        code_ += "array[i] = _fb_bytes.decode_{{PBASUFFIX}}( array_start + i * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "# To return packed array types, the scalar elements have to be of an appropriate type.";
         code_ += "return array";
@@ -1464,7 +1465,7 @@ public:
       case BASE_TYPE_DOUBLE:
         code_.SetValue("PBA_CONVERT", gdPBAConvert(element.base_type));
         code_ += "var array_end: int = array_start + array_size * {{ELEMENT_SIZE}}";
-        code_ += "return bytes.slice( array_start, array_end ).{{PBA_CONVERT}}()";
+        code_ += "return _fb_bytes.slice( array_start, array_end ).{{PBA_CONVERT}}()";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1491,7 +1492,7 @@ public:
         code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
-        code_ += "return bytes[array_start + index]";
+        code_ += "return _fb_bytes[array_start + index]";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1503,7 +1504,7 @@ public:
         code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
-        code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_ += "return _fb_bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "";
         break;
@@ -1514,7 +1515,7 @@ public:
         code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
         code_ += "if not array_start: return 0";
         code_ += "array_start += 4";
-        code_ += "return bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
+        code_ += "return _fb_bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
         code_.DecrementIdentLevel();
         code_ += "";
         return;
@@ -1550,7 +1551,7 @@ public:
 
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size: int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
     code_ += "var array: {{GODOT_TYPE}}";
     code_ += "if array.resize( array_size ) != OK: return []";
@@ -1562,7 +1563,7 @@ public:
     } else {
       code_ +=
           "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
-          "(bytes, array_start + i * {{ELEMENT_SIZE}} )";
+          "(_fb_bytes, array_start + i * {{ELEMENT_SIZE}} )";
     }
 
     code_.DecrementIdentLevel();
@@ -1585,22 +1586,22 @@ public:
     }
     code_.IncrementIdentLevel();
     code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
-    code_ += "var array_size: int = bytes.decode_u32( field_start )";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
     code_ += "var array_start: int = field_start + 4";
     code_ += "assert(field_start, 'Field is not present in buffer' )";
     code_ += "assert( idx < array_size, 'index is out of bounds')";
     code_ += "var relative_offset: int = array_start + idx * 4";
-    code_ += "var offset: int = relative_offset + bytes.decode_u32( relative_offset )";
+    code_ += "var offset: int = relative_offset + _fb_bytes.decode_u32( relative_offset )";
     if ( is_builtin_sruct ) {
       code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
     }else {
       code_ += "if into:";
       code_.IncrementIdentLevel();
-      code_ += "into.bytes = bytes";
-      code_ += "into.start = relative_offset";
+      code_ += "into._fb_bytes = _fb_bytes";
+      code_ += "into._fb_start = relative_offset";
       code_ += "return into";
       code_.DecrementIdentLevel();
-      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, offset )";;
+      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, offset )";;
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1626,7 +1627,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size: int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
     code_ += "var array: Array";
     code_ += "if array.resize( array_size ) != OK: return []";
@@ -1634,9 +1635,9 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var p: int = array_start + i * 4";
     if (IsBuiltinStruct(element)) {
-      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + bytes.decode_u32( p ) )";
+      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + _fb_bytes.decode_u32( p ) )";
     } else {
-      code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( bytes, p + bytes.decode_u32( p ) )";
+      code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, p + _fb_bytes.decode_u32( p ) )";
     }
 
     code_.DecrementIdentLevel();
@@ -1659,14 +1660,14 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
-    code_ += "var array_size: int = bytes.decode_u32( array_start )";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
     code_ += "var array: {{GODOT_TYPE}}";
     code_ += "if array.resize( array_size ) != OK: return []";
     code_ += "for i: int in array_size:";
     code_.IncrementIdentLevel();
     code_ += "var idx: int = array_start + i * {{ELEMENT_SIZE}}";
-    code_ += "var element_start: int = idx + bytes.decode_u32( idx )";
+    code_ += "var element_start: int = idx + _fb_bytes.decode_u32( idx )";
     code_ += "array[i] = decode_String( element_start )";
     code_.DecrementIdentLevel();
     code_ += "return array";
@@ -1683,7 +1684,7 @@ public:
     code_ += "if not array_start: return ''";
     code_ += "array_start += 4";
     code_ += "var string_start: int = array_start + index * {{ELEMENT_SIZE}}";
-    code_ += "string_start += bytes.decode_u32( string_start )";
+    code_ += "string_start += _fb_bytes.decode_u32( string_start )";
     code_ += "return decode_String( string_start )";
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1730,7 +1731,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
     code_ += "if not array_start: return 0";
-    code_ += "return bytes.decode_u32( array_start )";
+    code_ += "return _fb_bytes.decode_u32( array_start )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1802,7 +1803,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant;
-    code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset )";
+    code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_start + foffset )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1824,7 +1825,7 @@ public:
       code_.SetValue("INCLUDE", GetInclude(type));
       code_ += "var field_offset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
       code_ += "if not field_offset: return null";
-      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, start + field_offset )";
+      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, _fb_start + field_offset )";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1847,7 +1848,7 @@ public:
     if (IsBuiltinStruct(type)) {
       code_ += "return decode_{{GODOT_TYPE}}( field_start )";
     } else {
-      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
+      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, field_start )";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1861,7 +1862,10 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant + " as {{GODOT_TYPE}}";
-    code_ += "return bytes.decode_{{PBA_SUFFIX}}( start + foffset ) as {{GODOT_TYPE}}";
+    //TODO The reflection.fbs uses the bitflags attribute for "AdvancedFeatures"
+    // Which would trigger the output of this function to be expressed as int.
+    code_ += "var decoded: {{GODOT_TYPE}} = _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_start + foffset )";
+    code_ += "return decoded";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1900,7 +1904,7 @@ public:
       if (IsBuiltinStruct(type)) {
         code_ += "return decode_{{GODOT_TYPE}}( field_start )";
       } else {
-        code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( bytes, field_start )";
+        code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, field_start )";
       }
       code_.DecrementIdentLevel();
     }
@@ -1963,7 +1967,7 @@ public:
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
     code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
     code_.IncrementIdentLevel();
-    code_ += "bytes = bytes_; start = start_";
+    code_ += "_fb_bytes = bytes_; _fb_start = start_";
     code_.DecrementIdentLevel();
     code_ += "";
   }
