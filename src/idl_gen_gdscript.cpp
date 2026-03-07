@@ -9,6 +9,7 @@
 
 #include "flatbuffers/base.h"
 #include "flatbuffers/code_generators.h"
+#include "flatbuffers/flatc.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
 
@@ -234,7 +235,9 @@ public:
     code_ += "";
 
     // Include Files
-    include_map[parser_.root_struct_def_->file] = "";
+    if( parser_.root_struct_def_ ) {
+      include_map[parser_.root_struct_def_->file] = "";
+    }
     for (const auto &[include_path, include_file] : parser_.GetIncludedFiles()) {
       if (include_path == "godot.fbs") continue;
 
@@ -281,18 +284,22 @@ public:
 
     // Generate get_root convenience function to get the root table without
     // having to pass its position
-    if (const auto &include_ident = include_map[parser_.root_struct_def_->file];
-        include_ident.length() > 0) {
-      code_.SetValue("INCLUDE_IDENT", include_ident + "_schema.");
+    if ( parser_.root_struct_def_) {
+      if (const auto &include_ident = include_map[parser_.root_struct_def_->file];
+          include_ident.length() > 0) {
+        code_.SetValue("INCLUDE_IDENT", include_ident + "_schema.");
+          } else {
+            code_.SetValue("INCLUDE_IDENT", "");
+          }
+      code_.SetValue("ROOT_STRUCT", EscapeKeyword(parser_.root_struct_def_->name));
+      code_ += "static func get_root( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
+      code_.IncrementIdentLevel();
+      code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
+      code_.DecrementIdentLevel();
+      code_ += "";
     } else {
-      code_.SetValue("INCLUDE_IDENT", "");
+      LogCompilerWarn("Missing root_type");
     }
-    code_.SetValue("ROOT_STRUCT", EscapeKeyword(parser_.root_struct_def_->name));
-    code_ += "static func get_root( _bytes : PackedByteArray ) -> {{ROOT_STRUCT}}:";
-    code_.IncrementIdentLevel();
-    code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
-    code_.DecrementIdentLevel();
-    code_ += "";
 
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
@@ -523,13 +530,19 @@ public:
   ║|___/__/___|_||_\__|_|\_,_\__,_\___\__,_|
   ╙─────────────────────────────────────────*/
   bool IsIncluded(const Type &type) const {
-    Definition *def;
-    if ( type.struct_def ) { def = type.struct_def;
+    const Definition *def = nullptr;
+    if ( type.struct_def ) {
+      def = type.struct_def;
     } else if ( type.enum_def ) {
       def = type.enum_def;
     } else { return false; }
 
-    return def->file != parser_.root_struct_def_->file;
+    //FIXME:  I am not happy with this method to check if a definition was
+    // incuded or not. It was originally being tested against the root_def, but
+    // I wanted to make a root definition optional. It might be worth
+    // co-opting namespaces to remove this.
+    return RelativeToRootPath("./", StripExtension(def->file))
+      != RelativeToRootPath("./", path_ + file_name_);
   }
 
   /*MARK: GetInclude
