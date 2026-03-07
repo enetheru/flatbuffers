@@ -34,8 +34,8 @@ namespace gdscript {
 #define GODOT_GEN_TYPES_SCALAR(TD) \
   TD(NONE,     "",       uint8_t,        int,     "",           "",                      Array,               0) \
   TD(UTYPE,    "",       uint8_t,        int,     "u8",         "",                      Array,               1) /* begin scalar/int */ \
-  TD(BOOL,     "bool",   uint8_t,        int,     "u8",         "",                      Array,               2) \
-  TD(CHAR,     "byte",   int8_t,         bool,    "s8",         "",                      Array,               3) \
+  TD(BOOL,     "bool",   uint8_t,        bool,    "u8",         "",                      Array,               2) \
+  TD(CHAR,     "byte",   int8_t,         int,     "s8",         "",                      Array,               3) \
   TD(UCHAR,    "ubyte",  uint8_t,        int,     "u8",         "",                      PackedByteArray,     4) \
   TD(SHORT,    "short",  int16_t,        int,     "s16",        "",                      Array,               5) \
   TD(USHORT,   "ushort", uint16_t,       int,     "u16",        "",                      Array,               6) \
