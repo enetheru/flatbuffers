@@ -1332,7 +1332,7 @@ public:
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return {{INCLUDE}}get_{{GODOT_TYPE}}(_fb_bytes, _fb_start + {{OFFSET}})";
-        code_ += "set(v): overwrite_bytes(v.bytes, v.start, _fb_start + {{OFFSET}}, v.size)";
+        code_ += "set(v): overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + {{OFFSET}}, v.size)";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsArray(type)){
@@ -2109,7 +2109,14 @@ public:
         if (IsBuiltinStruct(type)) {
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         } else {
-          code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}.bytes ) ";
+          code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}._fb_bytes ) ";
+          /* FIXME The function "overwrite_fb_bytes()" returns a value that will be discarded if not used.
+           *  get(): return _bench_schema.get_FBFoo(_fb_bytes, _fb_start + 0)
+           *  set(v):
+           *    @warning_ignore("return_value_discarded")
+           *    overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + 0, v.size)
+           */
+
         }
       }
       else if (IsTable(type)) {
