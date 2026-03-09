@@ -1516,9 +1516,12 @@ public:
     const auto &type = field.value.type;
     const Type element = type.VectorType();
     const auto struct_def = element.struct_def;
+    const bool is_packed = packed_structs.find(struct_def->name) != packed_structs.end();
 
     code_.SetValue("ELEMENT_SIZE", NumToString( struct_def->bytesize) );
-    if (packed_structs.find(struct_def->name) != packed_structs.end()) {
+    code_.SetValue("ELEMENT_TYPE", GetGodotType(element) );
+    code_.SetValue("ELEMENT_TYPE_LC", ConvertCase(GetGodotType(element), Case::kAllLower) );
+    if (is_packed) {
       code_.SetValue("GODOT_TYPE", "Packed" + GetGodotType(element) + "Array");
     } else {
       code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
@@ -1526,25 +1529,38 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
 
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
-    code_ += "if not array_start: return []";
-    code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
-    code_ += "array_start += 4";
-    code_ += "var array: {{GODOT_TYPE}}";
-    code_ += "if array.resize( array_size ) != OK: return []";
-    code_ += "for i: int in array_size:";
-    code_.IncrementIdentLevel();
-
-    if (IsBuiltinStruct(element)) {
-      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
+    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "if not field_start: return []\n";
+    code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
+    code_ += "var array_start:int = field_start + 4";
+    if ( is_packed) {
+      code_ +="return _fb_bytes.slice(";
+      code_.IncrementIdentLevel();
+      code_.IncrementIdentLevel();
+      {
+        code_ += "array_start, array_start + array_size * {{ELEMENT_SIZE}} ) \\\\";
+        code_ += "";
+        code_ += ".to_{{ELEMENT_TYPE_LC}}_array()";
+      }
+      code_.DecrementIdentLevel();
+      code_.DecrementIdentLevel();
     } else {
-      code_ +=
-          "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
-          "_fb_bytes, array_start + i * {{ELEMENT_SIZE}} )";
-    }
+      code_ += "var array: {{GODOT_TYPE}}";
+      code_ += "if array.resize( array_size ) != OK: return []";
+      code_ += "for i: int in array_size:";
+      code_.IncrementIdentLevel();
 
-    code_.DecrementIdentLevel();
-    code_ += "return array";
+      if (IsBuiltinStruct(element)) {
+        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
+      } else {
+        code_ +=
+            "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
+            "_fb_bytes, array_start + i * {{ELEMENT_SIZE}} )";
+      }
+
+      code_.DecrementIdentLevel();
+      code_ += "return array";
+    }
 
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1553,9 +1569,9 @@ public:
   void GenFieldVectorStructAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
-    const bool is_builtin_sruct = IsBuiltinStruct(field.value.type.VectorType());
+    const bool is_builtin_struct = IsBuiltinStruct(field.value.type.VectorType());
 
-    if( is_builtin_sruct ) {
+    if( is_builtin_struct ) {
       // TODO research whether default values for structs is viable?
       code_ += "func {{FIELD_NAME}}_at( idx: int ) -> {{ELEMENT_TYPE}}:";
     } else {
@@ -1563,15 +1579,17 @@ public:
     }
     code_.IncrementIdentLevel();
     code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "assert(field_start, 'Field is not present in buffer' )\n";
+
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
+    code_ += "assert( idx < array_size, 'index is out of bounds')\n";
+
     code_ += "var array_start: int = field_start + 4";
-    code_ += "assert(field_start, 'Field is not present in buffer' )";
-    code_ += "assert( idx < array_size, 'index is out of bounds')";
-    code_ += "var relative_offset: int = array_start + idx * 4";
-    code_ += "var offset: int = relative_offset + _fb_bytes.decode_u32( relative_offset )";
-    if ( is_builtin_sruct ) {
-      code_ += "return decode_{{ELEMENT_TYPE}}( offset )";
-    }else {
+    if ( is_builtin_struct ) {
+      code_ += "return decode_{{ELEMENT_TYPE}}( array_start + idx * {{ELEMENT_SIZE}} )";
+    } else {
+      code_ += "var relative_offset: int = array_start + idx * 4";
+      code_ += "var offset: int = relative_offset + _fb_bytes.decode_u32( relative_offset )";
       code_ += "if into:";
       code_.IncrementIdentLevel();
       code_ += "into._fb_bytes = _fb_bytes";
