@@ -283,56 +283,33 @@ public:
       code_ += "";
     }
 
-    // Generate get_root convenience function to get the root table without
-    // having to pass its position
-    if ( parser_.root_struct_def_) {
-      if (const auto &include_ident = include_map[parser_.root_struct_def_->file];
-          include_ident.length() > 0) {
-        code_.SetValue("INCLUDE_IDENT", include_ident + "_schema.");
-          } else {
-            code_.SetValue("INCLUDE_IDENT", "");
-          }
-      code_.SetValue("ROOT_STRUCT", EscapeKeyword(parser_.root_struct_def_->name));
-      code_ += "static func get_root( _bytes: PackedByteArray ) -> {{ROOT_STRUCT}}:";
-      code_.IncrementIdentLevel();
-      code_ += "return {{INCLUDE_IDENT}}get_{{ROOT_STRUCT}}( _bytes, _bytes.decode_u32(0) )";
-      code_.DecrementIdentLevel();
-      code_ += "";
-    } else {
-      LogCompilerWarn("Missing root_type");
-    }
-
     // Generate code for all the enum declarations.
     for (const auto &enum_def : parser_.enums_.vec) {
-      if (!enum_def->generated) { GenEnum(*enum_def); }
-    }
-
-    // Generate code for all structs, then all tables.
-    for (const auto &struct_def : parser_.structs_.vec) {
-      if (struct_def->fixed && !struct_def->generated) {
-        GenStructCreate(*struct_def);
-        GenStruct(*struct_def);
+      if (!enum_def->generated) {
+        GenEnum(*enum_def);
       }
     }
 
+    // Generate code for all structs
+    for (const auto &struct_def : parser_.structs_.vec) {
+      if (struct_def->fixed && !struct_def->generated) {
+        GenStruct(*struct_def);
+        GenStructCreate(*struct_def);
+      }
+    }
+
+    // Generate code for all tables
     for (const auto &struct_def : parser_.structs_.vec) {
       if (!struct_def->fixed && !struct_def->generated) {
         GenTable(*struct_def);
         GenTableBuilder(*struct_def);
+        GenTableCreate(*struct_def);
       }
     }
 
-    // Generate the static get_<> functions for the structs and then tables
-    for (const auto &struct_def : parser_.structs_.vec) {
-      if (struct_def->fixed && !struct_def->generated) {
-        GenStructGet(*struct_def);
-      }
-    }
-    for (const auto &struct_def : parser_.structs_.vec) {
-      if (!struct_def->fixed && !struct_def->generated) {
-        GenStructGet( *struct_def );
-        GenTableCreate(*struct_def);
-      }
+    // Only the root_type gets a get_Type function.
+    if ( parser_.root_struct_def_) {
+      GenStructGet( *parser_.root_struct_def_ );
     }
 
     // Optional: UnPackObject API
@@ -1079,10 +1056,10 @@ public:
   ╙────────────────────────────────────────────────────*/
   void GenStructGet(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    code_ += "static func get_{{STRUCT_NAME}}( _bytes: PackedByteArray, _start: int = 0 ) -> {{STRUCT_NAME}}:";
+    code_ += "static func get_{{STRUCT_NAME}}( _bytes: PackedByteArray ) -> {{STRUCT_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "assert(not _bytes.is_empty())";
-    code_ += "return {{STRUCT_NAME}}.new(_bytes, _start)";
+    code_ += "return {{STRUCT_NAME}}.new(_bytes, _bytes.decode_u32(0))";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1220,7 +1197,7 @@ public:
     } else if ( IsBuiltinStruct( element ) ) {
       code_ += "return _fb_bytes.decode_{{ELEMENT_TYPE}}( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else if ( IsStruct(element) ) {
-      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
+      code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, {{OFFSET}} + idx * {{ELEMENT_SIZE}})";
     } else {
       code_ += "return null";
       code_ += "# FIXME Unknown Type";
@@ -1331,7 +1308,7 @@ public:
       } else if (IsStruct(type)) {
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return {{INCLUDE}}get_{{GODOT_TYPE}}(_fb_bytes, _fb_start + {{OFFSET}})";
+        code_ += "get(): return {{INCLUDE}}{{GODOT_TYPE}}.new(_fb_bytes, _fb_start + {{OFFSET}})";
         code_ += "set(v): overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + {{OFFSET}}, v.size)";
         code_.DecrementIdentLevel();
         code_ += "";
@@ -1562,8 +1539,8 @@ public:
       code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
     } else {
       code_ +=
-          "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}"
-          "(_fb_bytes, array_start + i * {{ELEMENT_SIZE}} )";
+          "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
+          "_fb_bytes, array_start + i * {{ELEMENT_SIZE}} )";
     }
 
     code_.DecrementIdentLevel();
@@ -1601,7 +1578,7 @@ public:
       code_ += "into._fb_start = relative_offset";
       code_ += "return into";
       code_.DecrementIdentLevel();
-      code_ += "return {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, offset )";;
+      code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, offset )";;
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1637,7 +1614,8 @@ public:
     if (IsBuiltinStruct(element)) {
       code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + _fb_bytes.decode_u32( p ) )";
     } else {
-      code_ += "array[i] = {{ELEMENT_INCLUDE}}get_{{ELEMENT_TYPE}}( _fb_bytes, p + _fb_bytes.decode_u32( p ) )";
+      code_ += "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
+        " _fb_bytes, p + _fb_bytes.decode_u32( p ) )";
     }
 
     code_.DecrementIdentLevel();
@@ -1825,7 +1803,7 @@ public:
       code_.SetValue("INCLUDE", GetInclude(type));
       code_ += "var field_offset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
       code_ += "if not field_offset: return null";
-      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, _fb_start + field_offset )";
+      code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, _fb_start + field_offset )";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1848,7 +1826,7 @@ public:
     if (IsBuiltinStruct(type)) {
       code_ += "return decode_{{GODOT_TYPE}}( field_start )";
     } else {
-      code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, field_start )";
+      code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1904,7 +1882,7 @@ public:
       if (IsBuiltinStruct(type)) {
         code_ += "return decode_{{GODOT_TYPE}}( field_start )";
       } else {
-        code_ += "return {{INCLUDE}}get_{{GODOT_TYPE}}( _fb_bytes, field_start )";
+        code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
       }
       code_.DecrementIdentLevel();
     }
@@ -2116,7 +2094,6 @@ public:
            *    @warning_ignore("return_value_discarded")
            *    overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + 0, v.size)
            */
-
         }
       }
       else if (IsTable(type)) {
