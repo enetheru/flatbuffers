@@ -643,10 +643,10 @@ public:
       code_ += "d.vtable['vtable_bytes'] = _fb_bytes.decode_u16( d.vtable_start )";
       code_ += "d.vtable['table_size'] = _fb_bytes.decode_u16( d.vtable_start + 2 )";
       code_ += "";
-      code_ += "for i: int in ((d.vtable.vtable_bytes / 2) - 2):";
+      code_ += "for i: int in ((d.vtable_bytes / 2) - 2):";
       code_.IncrementIdentLevel();
-      code_ += "var keys: Array = vtable.keys()";
-      code_ += "var offsets: Array = vtable.values()";
+      code_ += "var keys: Array = keys()";
+      code_ += "var offsets: Array = values()";
       code_ += "d.vtable[keys[i]] = _fb_bytes.decode_u16( d.vtable_start + offsets[i] )";
       code_.DecrementIdentLevel();
       code_ += "";
@@ -674,7 +674,7 @@ public:
       // Field Types:
       code_.SetValue("DICT", Name(*field) + "_dict");
       code_ += "var {{DICT}}: Dictionary = {'type':'{{FIELD_TYPE}}'}";
-      code_ += "{{DICT}}['offset'] = get_field_offset( vtable.{{OFFSET_NAME}} )";
+      code_ += "{{DICT}}['offset'] = get_field_offset( {{OFFSET_NAME}} )";
 
       if (!struct_def.fixed) {
         // If we are a table, then all fields are optional.
@@ -705,8 +705,8 @@ public:
       // Vector of
       else if (IsVector(field_type)) {
         code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
-        code_ += "{{DICT}}['start'] = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ += "{{DICT}}['size'] = _fb_bytes.decode_u32( get_field_start( vtable.{{OFFSET_NAME}} ) )";
+        code_ += "{{DICT}}['start'] = get_field_start( {{OFFSET_NAME}} )";
+        code_ += "{{DICT}}['size'] = _fb_bytes.decode_u32( get_field_start( {{OFFSET_NAME}} ) )";
         // Scalar
         if (IsScalar(field_type.element)) {
           code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
@@ -1360,7 +1360,7 @@ public:
       // We need to add a trailing comma to all elements except the last one as
       // older versions of gcc complain about this.
       code_.SetValue("SEP", "");
-      code_ += "enum vtable {";
+      code_ += "enum {";
       code_.IncrementIdentLevel();
       bool sep = false;
       code_.SetValue("SEP", ",");
@@ -1401,7 +1401,7 @@ public:
     }
     code_ += "func {{FIELD_NAME}}_is_present() -> bool:";
     code_.IncrementIdentLevel();
-    code_ += "return get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "return get_field_offset( {{OFFSET_NAME}} )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1423,7 +1423,7 @@ public:
       {" Decode and return all elements of {{FIELD_NAME}} as an [{{GODOT_TYPE}}]"}, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1480,7 +1480,7 @@ public:
       {" Access elements of {{FIELD_NAME}} by [param index]"}, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "assert(array_start, 'access to invalid vector of enum')";
     code_ += "array_start += 4";
     switch (element.base_type) {
@@ -1541,7 +1541,7 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
 
-    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return []\n";
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
     code_ += "var array_start:int = field_start + 4";
@@ -1591,7 +1591,7 @@ public:
       code_ += "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
     }
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "assert(field_start, 'Field is not present in buffer' )\n";
 
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
@@ -1634,7 +1634,7 @@ public:
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1669,7 +1669,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1692,7 +1692,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return ''";
     code_ += "array_start += 4";
     code_ += "var string_start: int = array_start + index * {{ELEMENT_SIZE}}";
@@ -1744,7 +1744,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return 0";
     code_ += "return _fb_bytes.decode_u32( array_start )";
     code_.DecrementIdentLevel();
@@ -1817,7 +1817,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "var foffset: int = get_field_offset( {{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant;
     code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_start + foffset )";
     code_.DecrementIdentLevel();
@@ -1837,10 +1837,10 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     if (IsBuiltinStruct(type)) {
-      code_ += "return get_{{GODOT_TYPE}}( vtable.{{OFFSET_NAME}} )";
+      code_ += "return get_{{GODOT_TYPE}}( {{OFFSET_NAME}} )";
     } else {
       code_.SetValue("INCLUDE", GetInclude(type));
-      code_ += "var field_offset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+      code_ += "var field_offset: int = get_field_offset( {{OFFSET_NAME}} )";
       code_ += "if not field_offset: return null";
       code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, _fb_start + field_offset )";
     }
@@ -1861,7 +1861,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
     if (IsBuiltinStruct(type)) {
       code_ += "return decode_{{GODOT_TYPE}}( field_start )";
@@ -1879,7 +1879,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
+    code_ += "var foffset: int = get_field_offset( {{OFFSET_NAME}} )";
     code_ += "if not foffset: return " + field.value.constant + " as {{GODOT_TYPE}}";
     //TODO The reflection.fbs uses the bitflags attribute for "AdvancedFeatures"
     // Which would trigger the output of this function to be expressed as int.
@@ -1910,7 +1910,7 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_.SetValue("INCLUDE", GetInclude(type));
-    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
     // match the type
     code_ += "match( {{FIELD_NAME}}_type() ):";
@@ -1946,7 +1946,7 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return ''";
     code_ += "return decode_String( field_start )";
     code_.DecrementIdentLevel();
@@ -2106,24 +2106,24 @@ public:
         // Unions are made of two fields, One to store the offset to the object,
         // and the other to identify which object is stored.
         if ( IsScalar(type.base_type) ) { // The identifier
-          code_ += "fbb_.add_element_ubyte( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+          code_ += "fbb_.add_element_ubyte( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         } else {
-          code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+          code_ += "fbb_.add_offset( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         }
       }
       else if (IsEnum(type)) {
         code_.SetValue("TYPE_NAME", TypeName(type.base_type) );
-        code_ += "fbb_.add_element_{{TYPE_NAME}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        code_ += "fbb_.add_element_{{TYPE_NAME}}( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       else if (field->IsScalar()) {
         code_.SetValue("TYPE_NAME", TypeName(type.base_type));
-        code_ += "fbb_.add_element_{{TYPE_NAME}}_default( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
+        code_ += "fbb_.add_element_{{TYPE_NAME}}_default( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{VALUE_DEFAULT}} )";
       }
       else if (IsStruct(type)) {
         if (IsBuiltinStruct(type)) {
-          code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+          code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         } else {
-          code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}}._fb_bytes ) ";
+          code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}}._fb_bytes ) ";
           /* FIXME The function "overwrite_fb_bytes()" returns a value that will be discarded if not used.
            *  get(): return _bench_schema.get_FBFoo(_fb_bytes, _fb_start + 0)
            *  set(v):
@@ -2133,13 +2133,13 @@ public:
         }
       }
       else if (IsTable(type)) {
-        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       else if (IsString(type)) {
-        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       else if (IsVector(type)) {
-        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.vtable.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+        code_ += "fbb_.add_offset( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
       }
       // TODO Vector of Union
       // TODO Fixed length Array
@@ -2166,7 +2166,7 @@ public:
       if (!field->deprecated && field->IsRequired()) {
         code_.SetValue("FIELD_NAME", Name(*field));
         code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
-        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.vtable.{{OFFSET_NAME}});";
+        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.{{OFFSET_NAME}});";
       }
     }
     code_ += "return o;";
