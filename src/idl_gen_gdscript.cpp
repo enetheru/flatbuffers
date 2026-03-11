@@ -266,7 +266,6 @@ public:
         if (const auto &enum_file = enum_def->file; enum_file != include_file) {
           continue;
         }
-
         code_.SetValue("ENUM_IDENT", EscapeKeyword(enum_def->name));
         code_ += "const {{ENUM_IDENT}} = {{SCHEMA_IDENT}}.{{ENUM_IDENT}}";
       }
@@ -609,12 +608,12 @@ public:
   ║| (_ / -_) ' \ (__/ _ \ '  \| '  \/ -_) ' \  _|
   ║ \___\___|_||_\___\___/_|_|_|_|_|_\___|_||_\__|
   ╙───────────────────────────────────────────────*/
-  void GenComment(const std::vector<std::string> &dc) {
+  void GenComment(const std::vector<std::string>& dc, const char* prefix = "") {
     if (dc.empty()) return;
-    std::string comment;
-    flatbuffers::GenComment(dc, &comment, &comment_config, "");
-    comment.pop_back(); // get rid of the newline.
-    code_ += comment;
+    std::string text;
+    ::flatbuffers::GenComment(dc, &text, &comment_config, prefix);
+    text.pop_back(); // remove the newline at the end of the comment string
+    code_ += text;
   }
 
 
@@ -1028,23 +1027,23 @@ public:
   void GenEnum(const EnumDef &enum_def) {
     code_.SetValue("ENUM_NAME", Name(enum_def));
 
-    GenComment(enum_def.doc_comment);
+    GenComment(enum_def.doc_comment, "#");
     code_ += "enum " + Name(enum_def) + " {";
     code_.IncrementIdentLevel();
 
-    code_.SetValue("SEP", ",");
-    auto add_sep = false;
-    for (const auto enum_val : enum_def.Vals()) {
-      if (add_sep) code_ += "{{SEP}}";
-      GenComment(enum_val->doc_comment);
-      auto key = ConvertCase(Name(*enum_val), Case::kAllUpper);
+    const auto vals = enum_def.Vals();
+    for ( unsigned int i = 0; i < vals.size() * 2 -1; ++i) {
+      if (i & 1) { code_ += ","; continue; } // Put a comma on every other line.
+      const auto enum_val = vals[i>>1]; // index was double in the for loop, so halve it.
+      auto key = ConvertCase(Name(*enum_val), Case::kScreamingSnake, Case::kUpperCamel);
       code_.SetValue("KEY", key);
       code_.SetValue("VALUE", enum_def.ToString(*enum_val));
+
+      GenComment(enum_val->doc_comment, "#");
       code_ += "{{KEY}} = {{VALUE}}\\";
-      add_sep = true;
     }
+    code_ += ""; // complete the last line.
     code_.DecrementIdentLevel();
-    code_ += "";
     code_ += "}\n";
   }
 
@@ -1056,6 +1055,10 @@ public:
   ╙────────────────────────────────────────────────────*/
   void GenStructGet(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
+
+
+    GenComment(
+      {" TODO: create a doc comment for the get_{{STRUCT_NAME}} function"}, "#");
     code_ += "static func get_{{STRUCT_NAME}}( _bytes: PackedByteArray ) -> {{STRUCT_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "assert(not _bytes.is_empty())";
@@ -1072,6 +1075,8 @@ public:
   ╙─────────────────────────────────────────────────────────────────*/
   void GenStructCreate(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
+    GenComment({
+      " TODO: create a useful doc comment for the static creation function"}, "#");
     code_ += "static func create_{{STRUCT_NAME}}(";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
@@ -1214,16 +1219,19 @@ public:
   ╙──────────────────────────────────────────────────────*/
   // Init function to prevent a rather spicy footgun
   void GenStructInit(const StructDef &struct_def[[maybe_unused]]) {
+    // TODO set document comment
+    GenComment({
+      " TODO: create a useful doc comment for the init function"}, "#");
     code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "if bytes_.is_empty(): ";
     code_.IncrementIdentLevel();
     code_ += "_fb_bytes = PackedByteArray()";
-    code_ += "_fb_bytes.resize( size )";
+    code_ += "_fb_bytes.resize( _fb_struct_size )";
     code_.DecrementIdentLevel();
     code_ += "else:";
     code_.IncrementIdentLevel();
-    code_ += "assert(start_ + size <= bytes_.size())";
+    code_ += "assert(start_ + _fb_struct_size <= bytes_.size())";
     code_ += "_fb_bytes = bytes_; _fb_start = start_";
     code_.DecrementIdentLevel();
     code_.DecrementIdentLevel();
@@ -1257,7 +1265,7 @@ public:
     // Generate class to access the structs fields
     // The generated classes are like a view into a PackedByteArray,
     // it decodes the data on access.
-    GenComment(struct_def.doc_comment);
+    GenComment(struct_def.doc_comment, "#");
 
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     code_.SetValue("NUM_BYTES", NumToString(struct_def.bytesize));
@@ -1270,7 +1278,7 @@ public:
     GenStructIncludes( struct_def );
 
     // Add the fixed size
-    code_ += "const size: int = {{NUM_BYTES}}";
+    code_ += "const _fb_struct_size: int = {{NUM_BYTES}}";
     code_ += "";
 
     // Init function to prevent a rather spicy footgun
@@ -1280,6 +1288,8 @@ public:
       if (field->deprecated) {
         // Deprecated fields won't be accessible.
         // TODO generate deprecated field with flag?
+        //  I think I should still generate the accessor, but have it return
+        //  either the default value, or send a warning or error.
         continue;
       }
 
@@ -1288,7 +1298,7 @@ public:
       code_.SetValue("OFFSET", NumToString(field->value.offset));
       code_.SetValue("GODOT_TYPE", GetGodotType(type));
       code_.SetValue("INCLUDE", GetInclude(type));
-      code_ += "# [================[ {{FIELD_NAME}} ]================]";
+      GenComment(field->doc_comment, "#");
       if (field->IsScalar()) {
         code_.SetValue("PBASUFFIX", gdPBASuffix(type.base_type));
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
@@ -1350,15 +1360,11 @@ public:
       // We need to add a trailing comma to all elements except the last one as
       // older versions of gcc complain about this.
       code_.SetValue("SEP", "");
-      code_ += "enum vtable{";
+      code_ += "enum vtable {";
       code_.IncrementIdentLevel();
       bool sep = false;
       code_.SetValue("SEP", ",");
       for (const auto &field : struct_def.fields.vec) {
-        if (field->deprecated) {
-          // Deprecated fields won't be accessible.
-          continue;
-        }
         code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
         code_.SetValue("OFFSET_VALUE", NumToString(field->value.offset));
         if (sep) code_ += "{{SEP}}";
@@ -1381,12 +1387,18 @@ public:
   void GenPresenceFunc(const FieldDef &field) {
     // Generate presence funcs
     code_.SetValue("FIELD_NAME", Name(field));
+    code_.SetValue("OFFSET_NAME",
+          "VT_" + ConvertCase(Name(field), Case::kAllUpper));
+    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
 
+    GenComment({
+        " Return true if {{FIELD_NAME}} is present in the buffer, else false"},
+        "#");
     if (field.IsRequired()) {
       // Required fields are always accessible.
-      code_ += "# {{FIELD_NAME}} is required\n";
+      GenComment({" attribute: required"}, "#");
+      // TODO do something more interesting for the required attribute.
     }
-    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
     code_ += "func {{FIELD_NAME}}_is_present() -> bool:";
     code_.IncrementIdentLevel();
     code_ += "return get_field_offset( vtable.{{OFFSET_NAME}} )";
@@ -1406,6 +1418,9 @@ public:
     const auto &type = field.value.type;
     const Type element = type.VectorType();
 
+    GenComment(field.doc_comment, "#");
+    GenComment(
+      {" Decode and return all elements of {{FIELD_NAME}} as an [{{GODOT_TYPE}}]"}, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1460,48 +1475,44 @@ public:
     const auto &type = field.value.type;
     const Type element = type.VectorType();
 
+    GenComment(field.doc_comment, "#");
+    GenComment(
+      {" Access elements of {{FIELD_NAME}} by [param index]"}, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
+    code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
+    code_ += "assert(array_start, 'access to invalid vector of enum')";
+    code_ += "array_start += 4";
     switch (element.base_type) {
       case BASE_TYPE_UTYPE:
       case BASE_TYPE_BOOL:
       case BASE_TYPE_UCHAR:
-        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ += "if not array_start: return 0";
-        code_ += "array_start += 4";
         code_ += "return _fb_bytes[array_start + index]";
-        code_.DecrementIdentLevel();
-        code_ += "";
         break;
       case BASE_TYPE_CHAR:
       case BASE_TYPE_SHORT:
       case BASE_TYPE_USHORT:
       case BASE_TYPE_UINT:
       case BASE_TYPE_ULONG:
-        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ += "if not array_start: return 0";
-        code_ += "array_start += 4";
         code_ += "return _fb_bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
-        code_.DecrementIdentLevel();
-        code_ += "";
         break;
       case BASE_TYPE_INT:
       case BASE_TYPE_LONG:
       case BASE_TYPE_FLOAT:
       case BASE_TYPE_DOUBLE:
-        code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
-        code_ += "if not array_start: return 0";
-        code_ += "array_start += 4";
         code_ += "return _fb_bytes.decode_{{PBASUFFIX}}( array_start + index * {{ELEMENT_SIZE}})";
-        code_.DecrementIdentLevel();
-        code_ += "";
-        return;
-      default:
-        // We shouldn't be here.
-        if (opts_.gdscript_debug) {
-          GenFieldDebug(field);
-        }
+        break;
+      case BASE_TYPE_NONE:
+      case BASE_TYPE_STRING:
+      case BASE_TYPE_VECTOR:
+      case BASE_TYPE_VECTOR64:
+      case BASE_TYPE_STRUCT:
+      case BASE_TYPE_UNION:
+      case BASE_TYPE_ARRAY:
+        break;
     }
+    code_.DecrementIdentLevel();
+    code_ += "";
   }
 
   /*MARK: GenFieldVectorStruct
@@ -1526,6 +1537,7 @@ public:
     } else {
       code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
     }
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
 
@@ -1571,6 +1583,7 @@ public:
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     const bool is_builtin_struct = IsBuiltinStruct(field.value.type.VectorType());
 
+    GenComment(field.doc_comment, "#");
     if( is_builtin_struct ) {
       // TODO research whether default values for structs is viable?
       code_ += "func {{FIELD_NAME}}_at( idx: int ) -> {{ELEMENT_TYPE}}:";
@@ -1617,6 +1630,7 @@ public:
       // TODO Handle this case properly.
 
     }
+    GenComment(field.doc_comment, "#");
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
@@ -1652,6 +1666,7 @@ public:
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     // func {{FIELD_NAME}}() -> Array|PackedArray
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1674,6 +1689,7 @@ public:
   void GenFieldVectorStringAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1695,6 +1711,7 @@ public:
   void GenFieldVectorUnionGet(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    GenComment(field.doc_comment, "#");
     code_ += "# TODO GenFieldVectorUnionGet ";
     code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
     code_ += "";
@@ -1706,6 +1723,7 @@ public:
   void GenFieldVectorUnionAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    GenComment(field.doc_comment, "#");
     code_ += "# TODO GenFieldVectorUnionAt ";
     code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
     code_ += "";
@@ -1723,6 +1741,7 @@ public:
   void GenFieldVectorSize(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
     code_ += "var array_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1795,6 +1814,7 @@ public:
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
@@ -1813,6 +1833,7 @@ public:
   void GenFieldStruct( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     if (IsBuiltinStruct(type)) {
@@ -1837,6 +1858,7 @@ public:
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_.SetValue("INCLUDE", GetInclude(type));
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var field_start: int = get_field_start( vtable.{{OFFSET_NAME}} )";
@@ -1854,6 +1876,7 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     const auto &type = field.value.type;
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_ += "var foffset: int = get_field_offset( vtable.{{OFFSET_NAME}} )";
@@ -1876,12 +1899,14 @@ public:
   void GenFieldUnion( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
-    // Unions are made of two parts, one of them is a scalar Enum
+    // FIXME Investigate this snippet:
+    //  Unions are made of two parts, one of them is a scalar Enum
     if (field.IsScalar()) {
       GenFieldEnum( field );
       return;
     }
 
+    GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
     code_.SetValue("INCLUDE", GetInclude(type));
@@ -1933,7 +1958,9 @@ public:
   ║ / __|___ _ _ | __(_)___| |__| |
   ║| (_ / -_) ' \| _|| / -_) / _` |
   ║ \___\___|_||_|_| |_\___|_\__,_|
-  ╙────────────────────────────────*/
+  ╙────────────────────────────────
+  Generate the field accessors.
+  */
   void GenField(const FieldDef &field) {
     // FIELD_NAME is set by GenTable
     const auto &type = field.value.type;
@@ -1941,13 +1968,14 @@ public:
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
 
-    if (IsUnion(type)) { GenFieldUnion( field ); }
+    if ( false ) {}
+    else if (IsSeries(type)) { GenFieldVector( field ); }
+    else if (IsString(type)) { GenFieldString( field ); }
+    else if (IsUnion(type)) { GenFieldUnion( field ); }
     else if (IsEnum(type)) { GenFieldEnum( field ); }
     else if (field.IsScalar()) {GenFieldScalar( field );}
     else if (IsStruct(type)) { GenFieldStruct( field ); }
     else if (IsTable(type)) { GenFieldTable( field ); }
-    else if (IsSeries(type)) { GenFieldVector( field ); }
-    else if (IsString(type)) { GenFieldString( field ); }
     else {
       if (opts_.gdscript_debug) {
         GenFieldDebug(field);
@@ -1961,6 +1989,8 @@ public:
 
   // Init function to prevent a rather spicy footgun
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
+    GenComment({
+      " TODO: create a useful doc comment for the init function"}, "#");
     code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "_fb_bytes = bytes_; _fb_start = start_";
@@ -1979,11 +2009,10 @@ public:
     // Generate classes to access the table fields
     // The generated classes are a view into a PackedByteArray,
     // will decode the data on access.
-    GenComment(struct_def.doc_comment);
-
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
     // generate Flatbuffer derived class
+    GenComment(struct_def.doc_comment, "#");
     code_ += "class {{TABLE_NAME}} extends FlatBuffer:";
     code_.IncrementIdentLevel();
 
@@ -1991,32 +2020,18 @@ public:
     GenVtableEnums(struct_def);
     GenTableInit(struct_def);
 
-    // Generate Presence Function
-    // {{FIELD_NAME}}_is_present() -> bool
-    code_ += "# Presence Functions";
-    for (const FieldDef *field : struct_def.fields.vec) {
-      code_.SetValue("FIELD_NAME", Name(*field));
-      if (field->deprecated) {
-        code_ += "# field:'{{FIELD_NAME}}' is deprecated\n";
-        // Deprecated fields won't be accessible.
-        continue;
-      }
-      code_.SetValue("OFFSET_NAME",
-                     "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
-      GenPresenceFunc(*field);
-    }
-
     // Generate the accessors.
     for (const FieldDef *field : struct_def.fields.vec) {
       code_.SetValue("FIELD_NAME", Name(*field));
       if (field->deprecated) {
         if (opts_.gdscript_debug) {
           code_ += "# field:'{{FIELD_NAME}}' is deprecated";
+          // Deprecated fields won't be accessible.
         }
         continue;
       }
-      code_ += "# [================[ {{FIELD_NAME}} ]================]";
-      GenComment(field->doc_comment);
+
+      GenPresenceFunc(*field);
       GenField(*field);
     }
 
@@ -2042,6 +2057,7 @@ public:
     code_.SetValue("STRUCT_NAME", Name(struct_def));
 
     // Generate a builder struct:
+    GenComment({" TODO: Write a Doc Comment for the builder"}, "#");
     code_ += "class {{STRUCT_NAME}}Builder extends RefCounted:";
     code_.IncrementIdentLevel();
     code_ += "var fbb_: FlatBufferBuilder";
@@ -2049,6 +2065,7 @@ public:
     code_ += "";
 
     // Add init function
+    GenComment({" TODO: Write a Doc Comment for the builder's init function"}, "#");
     code_ += "func _init( _fbb: FlatBufferBuilder ) -> void:";
     code_.IncrementIdentLevel();
     code_ += "fbb_ = _fbb";
@@ -2079,6 +2096,7 @@ public:
       code_.SetValue("VALUE_DEFAULT", is_default_scalar ? field->value.constant : "");
 
       // Function Signature
+      GenComment({" TODO: Write a Doc Comment for the builder's add functions"}, "#");
       code_ += "func add_{{FIELD_NAME}}( {{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}} ) -> void:";
       code_.IncrementIdentLevel();
 
@@ -2138,6 +2156,7 @@ public:
 
     // var finish(): -> void
     // ---------------------
+    GenComment({" TODO: Write a Doc Comment for the builder's finish function"}, "#");
     code_ += "func finish() -> int:";
     code_.IncrementIdentLevel();
     code_ += "var end: int = fbb_.end_table( start_ )";
@@ -2152,8 +2171,6 @@ public:
     }
     code_ += "return o;";
     code_.DecrementIdentLevel();
-    code_ += "";
-
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -2169,6 +2186,7 @@ public:
     // to create a table in one go.
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
+    GenComment({" TODO: Write a Doc Comment for the static table create function"}, "#");
     code_ += "static func create_{{TABLE_NAME}}( _fbb: FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
