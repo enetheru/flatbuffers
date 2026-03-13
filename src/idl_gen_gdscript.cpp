@@ -1319,7 +1319,9 @@ public:
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
         code_ += "get(): return {{INCLUDE}}{{GODOT_TYPE}}.new(_fb_bytes, _fb_start + {{OFFSET}})";
-        code_ += "set(v): overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + {{OFFSET}}, v.size)";
+        code_ += "set(v): overwrite_bytes(v._fb_bytes, v._fb_start, _fb_start + {{OFFSET}}, v._fb_struct_size)";
+        // TODO overwrite bytes returns an Error code OK or one of the Error enum values. which needs to be handled
+        //  or a warning will show in the script.
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsArray(type)){
@@ -1598,18 +1600,17 @@ public:
     code_ += "assert( idx < array_size, 'index is out of bounds')\n";
 
     code_ += "var array_start: int = field_start + 4";
+    code_ += "var element_offset: int = array_start + idx * {{ELEMENT_SIZE}}";
     if ( is_builtin_struct ) {
-      code_ += "return decode_{{ELEMENT_TYPE}}( array_start + idx * {{ELEMENT_SIZE}} )";
+      code_ += "return decode_{{ELEMENT_TYPE}}( element_offset )";
     } else {
-      code_ += "var relative_offset: int = array_start + idx * 4";
-      code_ += "var offset: int = relative_offset + _fb_bytes.decode_u32( relative_offset )";
       code_ += "if into:";
       code_.IncrementIdentLevel();
       code_ += "into._fb_bytes = _fb_bytes";
-      code_ += "into._fb_start = relative_offset";
+      code_ += "into._fb_start = element_offset";
       code_ += "return into";
       code_.DecrementIdentLevel();
-      code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, offset )";;
+      code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, element_offset )";;
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1769,7 +1770,13 @@ public:
     code_.SetValue("PBASUFFIX", gdPBASuffix(element.base_type));
 
     // The size is the same for all vector fields.
-    GenFieldVectorSize(field);
+    // We can skip the UnionType as it is a duplicate
+    if (!IsUnionType(element)) {
+      GenFieldVectorSize(field);
+    }
+
+    // it looks like that vectors of union are expressed as two separate fields
+    // But we dont wantt o duplicate presence, and size.
 
     if (IsScalar(element.base_type)) {
       GenFieldVectorScalarGet( field );
@@ -1873,8 +1880,12 @@ public:
   }
 
   void GenFieldEnum( const FieldDef &field ) {
-    // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     const auto &type = field.value.type;
+    code_.SetValue("FIELD_NAME", Name(field));
+    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
+    code_.SetValue("GODOT_TYPE", GetGodotType(type));
+    code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
+
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
@@ -1897,30 +1908,37 @@ public:
   ║ \___\___|_||_|_| |_\___|_\__,_|\___/|_||_|_\___/_||_|
   ╙──────────────────────────────────────────────────────*/
   void GenFieldUnion( const FieldDef &field ) {
+    // Generate the type accessor first.
+    field.sibling_union_field->doc_comment = {
+      " TODO: Write a doc comment for the union_type accessor"
+    };
+    GenFieldEnum( *field.sibling_union_field );
+
     const auto &type = field.value.type;
-    // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
-    // FIXME Investigate this snippet:
-    //  Unions are made of two parts, one of them is a scalar Enum
-    if (field.IsScalar()) {
-      GenFieldEnum( field );
-      return;
-    }
+    code_.SetValue("FIELD_NAME", Name(field));
+    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
+    code_.SetValue("GODOT_TYPE", GetGodotType(type));
+    code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
+    code_.SetValue("ENUM_TYPE", type.enum_def->name);
 
     GenComment(field.doc_comment, "#");
-    code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
+    code_ += "func {{FIELD_NAME}}() -> Variant:";
     code_.IncrementIdentLevel();
-    code_.SetValue("INCLUDE", GetInclude(type));
     code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
+
     // match the type
     code_ += "match( {{FIELD_NAME}}_type() ):";
     code_.IncrementIdentLevel();
-    code_.SetValue("ENUM_TYPE", type.enum_def->name);
+
     for (const auto &val : type.enum_def->Vals()) {
       if (val->IsZero()) continue;
-      code_.SetValue("ENUM_VALUE", ConvertCase(val->name, Case::kAllUpper));
+      code_.SetValue("INCLUDE", GetInclude(val->union_type));
+      code_.SetValue("ENUM_VALUE",
+        ConvertCase( val->name,
+          Case::kScreamingSnake, Case::kUpperCamel));
       code_.SetValue("GODOT_TYPE", GetGodotType(val->union_type));
-      code_ += "{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
+      code_ += "{{INCLUDE}}{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
       code_.IncrementIdentLevel();
       if (IsBuiltinStruct(type)) {
         code_ += "return decode_{{GODOT_TYPE}}( field_start )";
@@ -1929,7 +1947,6 @@ public:
       }
       code_.DecrementIdentLevel();
     }
-    code_ += "_: pass";
     code_.DecrementIdentLevel();
     code_ += "return null";
     code_.DecrementIdentLevel();
@@ -1964,14 +1981,24 @@ public:
   void GenField(const FieldDef &field) {
     // FIELD_NAME is set by GenTable
     const auto &type = field.value.type;
+    code_.SetValue("FIELD_NAME", Name(field));
     code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
 
-    if ( false ) {}
-    else if (IsSeries(type)) { GenFieldVector( field ); }
+    // Handle vectors elsewhere.
+    if (IsSeries(type)) {
+      GenFieldVector( field );
+      return;
+    }
+
+    // Skip the union types, it will be handled by GenFieldUnion
+    if (IsUnionType(type)) { return; }
+
+    GenPresenceFunc(field);
+
+    if (IsUnion(type)) { GenFieldUnion( field ); }
     else if (IsString(type)) { GenFieldString( field ); }
-    else if (IsUnion(type)) { GenFieldUnion( field ); }
     else if (IsEnum(type)) { GenFieldEnum( field ); }
     else if (field.IsScalar()) {GenFieldScalar( field );}
     else if (IsStruct(type)) { GenFieldStruct( field ); }
@@ -2030,8 +2057,6 @@ public:
         }
         continue;
       }
-
-      GenPresenceFunc(*field);
       GenField(*field);
     }
 
@@ -2124,11 +2149,11 @@ public:
           code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
         } else {
           code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}}._fb_bytes ) ";
-          /* FIXME The function "overwrite_fb_bytes()" returns a value that will be discarded if not used.
+          /* FIXME The function "overwrite_bytes()" returns a value that will be discarded if not used.
            *  get(): return _bench_schema.get_FBFoo(_fb_bytes, _fb_start + 0)
            *  set(v):
            *    @warning_ignore("return_value_discarded")
-           *    overwrite_fb_bytes(v._fb_bytes, v._fb_start, _fb_start + 0, v.size)
+           *    overwrite_bytes(v._fb_bytes, v._fb_start, _fb_start + 0, v._fb_struct_size)
            */
         }
       }
