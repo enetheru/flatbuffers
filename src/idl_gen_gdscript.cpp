@@ -1388,11 +1388,6 @@ public:
   ╙────────────────────────────────────────────────────────────────*/
   void GenPresenceFunc(const FieldDef &field) {
     // Generate presence funcs
-    code_.SetValue("FIELD_NAME", Name(field));
-    code_.SetValue("OFFSET_NAME",
-          "VT_" + ConvertCase(Name(field), Case::kAllUpper));
-    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
-
     GenComment({
         " Return true if {{FIELD_NAME}} is present in the buffer, else false"},
         "#");
