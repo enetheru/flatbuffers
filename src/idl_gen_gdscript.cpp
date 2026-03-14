@@ -705,8 +705,8 @@ public:
       // Vector of
       else if (IsVector(field_type)) {
         code_ += "{{DICT}}['type'] = '{{FIELD_TYPE}} of {{ELEMENT_TYPE}}'";
-        code_ += "{{DICT}}['start'] = get_field_start( {{OFFSET_NAME}} )";
-        code_ += "{{DICT}}['size'] = _fb_bytes.decode_u32( get_field_start( {{OFFSET_NAME}} ) )";
+        code_ += "{{DICT}}['start'] = get_offset_field_start( {{OFFSET_NAME}} )";
+        code_ += "{{DICT}}['size'] = _fb_bytes.decode_u32( get_offset_field_start( {{OFFSET_NAME}} ) )";
         // Scalar
         if (IsScalar(field_type.element)) {
           code_ += "{{DICT}}['value'] = {{FIELD_NAME}}()";
@@ -1297,6 +1297,7 @@ public:
       code_.SetValue("FIELD_NAME", Name(*field));
       code_.SetValue("OFFSET", NumToString(field->value.offset));
       code_.SetValue("GODOT_TYPE", GetGodotType(type));
+      code_.SetValue("VARIANT_TYPE", "TYPE_" + ConvertCase(GetGodotType(type), Case::kAllUpper));
       code_.SetValue("INCLUDE", GetInclude(type));
       GenComment(field->doc_comment, "#");
       if (field->IsScalar()) {
@@ -1311,8 +1312,8 @@ public:
       } else if (IsStruct(type) && IsBuiltinStruct(type)) {
         code_ += "var {{FIELD_NAME}}: {{GODOT_TYPE}} :";
         code_.IncrementIdentLevel();
-        code_ += "get(): return decode_{{GODOT_TYPE}}(_fb_start + {{OFFSET}})";
-        code_ += "set(v): encode_{{GODOT_TYPE}}(_fb_start + {{OFFSET}}, v)";
+        code_ += "get(): return decode_variant(_fb_start + {{OFFSET}}, {{VARIANT_TYPE}})";
+        code_ += "set(v): encode_variant(_fb_start + {{OFFSET}}, v, {{VARIANT_TYPE}})";
         code_.DecrementIdentLevel();
         code_ += "";
       } else if (IsStruct(type)) {
@@ -1420,7 +1421,7 @@ public:
       {" Decode and return all elements of {{FIELD_NAME}} as an [{{GODOT_TYPE}}]"}, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1477,7 +1478,7 @@ public:
       {" Access elements of {{FIELD_NAME}} by [param index]"}, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "assert(array_start, 'access to invalid vector of enum')";
     code_ += "array_start += 4";
     switch (element.base_type) {
@@ -1538,7 +1539,7 @@ public:
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
 
-    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return []\n";
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
     code_ += "var array_start:int = field_start + 4";
@@ -1560,7 +1561,7 @@ public:
       code_.IncrementIdentLevel();
 
       if (IsBuiltinStruct(element)) {
-        code_ += "array[i] = decode_{{ELEMENT_TYPE}}( array_start + i * {{ELEMENT_SIZE}})";
+        code_ += "array[i] = decode_variant( array_start + i * {{ELEMENT_SIZE}}, {{VARIANT_TYPE}})";
       } else {
         code_ +=
             "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
@@ -1588,7 +1589,7 @@ public:
       code_ += "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
     }
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "assert(field_start, 'Field is not present in buffer' )\n";
 
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
@@ -1597,7 +1598,8 @@ public:
     code_ += "var array_start: int = field_start + 4";
     code_ += "var element_offset: int = array_start + idx * {{ELEMENT_SIZE}}";
     if ( is_builtin_struct ) {
-      code_ += "return decode_{{ELEMENT_TYPE}}( element_offset )";
+
+      code_ += "return decode_variant( element_offset, {{VARIANT_TYPE}} )";
     } else {
       code_ += "if into:";
       code_.IncrementIdentLevel();
@@ -1608,6 +1610,39 @@ public:
       code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, element_offset )";;
     }
     code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+
+  void GenFieldVectorTableAt(const FieldDef &field [[maybe_unused]]) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+
+    GenComment(field.doc_comment, "#");
+    code_ += "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
+    code_.IncrementIdentLevel(); {
+      code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
+      code_ += "assert(field_start, 'Field is not present in buffer' )\n";
+
+      code_ += "# The field is a vector of table, so the inline data is a vector of";
+      code_ += "# offsets to the element location.\n";
+
+      code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
+      code_ += "assert( idx < array_size, 'index is out of bounds')\n";
+
+      code_ += "var array_start: int = field_start + 4";
+      code_ += "var element_pos: int = array_start + idx * {{ELEMENT_SIZE}}";
+      code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
+      code_ += "if into:";
+      code_.IncrementIdentLevel(); {
+        code_ += "into._fb_bytes = _fb_bytes";
+        code_ += "into._fb_start = element_pos + element_offset";
+        code_ += "return into";
+        code_.DecrementIdentLevel();
+      }
+      code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, element_pos + element_offset )";;
+      code_.DecrementIdentLevel();
+    }
     code_ += "";
   }
 
@@ -1630,7 +1665,7 @@ public:
     // func {{FIELD_NAME}}() -> Array|PackedArray
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1640,7 +1675,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var p: int = array_start + i * 4";
     if (IsBuiltinStruct(element)) {
-      code_ += "array[i] = decode_{{ELEMENT_TYPE}}( p + _fb_bytes.decode_u32( p ) )";
+      code_ += "array[i] = decode_variant( p + _fb_bytes.decode_u32( p ), {{VARIANT_TYPE}} )";
     } else {
       code_ += "array[i] = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new("
         " _fb_bytes, p + _fb_bytes.decode_u32( p ) )";
@@ -1665,7 +1700,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return []";
     code_ += "var array_size: int = _fb_bytes.decode_u32( array_start )";
     code_ += "array_start += 4";
@@ -1675,7 +1710,7 @@ public:
     code_.IncrementIdentLevel();
     code_ += "var idx: int = array_start + i * {{ELEMENT_SIZE}}";
     code_ += "var element_start: int = idx + _fb_bytes.decode_u32( idx )";
-    code_ += "array[i] = decode_String( element_start )";
+    code_ += "array[i] = decode_variant( element_start, TYPE_STRING )";
     code_.DecrementIdentLevel();
     code_ += "return array";
     code_.DecrementIdentLevel();
@@ -1688,12 +1723,12 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_at( index: int ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return ''";
     code_ += "array_start += 4";
     code_ += "var string_start: int = array_start + index * {{ELEMENT_SIZE}}";
     code_ += "string_start += _fb_bytes.decode_u32( string_start )";
-    code_ += "return decode_String( string_start )";
+    code_ += "return decode_variant( string_start, TYPE_STRING )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1740,7 +1775,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}_size() -> int:";
     code_.IncrementIdentLevel();
-    code_ += "var array_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var array_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not array_start: return 0";
     code_ += "return _fb_bytes.decode_u32( array_start )";
     code_.DecrementIdentLevel();
@@ -1761,6 +1796,7 @@ public:
     const Type element = type.VectorType();
     code_.SetValue("ELEMENT_INCLUDE", GetInclude(element) );
     code_.SetValue("ELEMENT_TYPE", GetGodotType(element));
+    code_.SetValue("VARIANT_TYPE", "TYPE_" + ConvertCase(GetGodotType(element), Case::kAllUpper));
     code_.SetValue("ELEMENT_SIZE", NumToString(SizeOf(element.base_type)));
     code_.SetValue("PBASUFFIX", gdPBASuffix(element.base_type));
 
@@ -1783,7 +1819,7 @@ public:
     }
     else if (IsTable(element)) {
       GenFieldVectorTableGet( field );
-      GenFieldVectorStructAt( field );
+      GenFieldVectorTableAt( field );
     }
     else if (IsString(element)) {
       GenFieldVectorStringGet( field );
@@ -1819,9 +1855,9 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var foffset: int = get_field_offset( {{OFFSET_NAME}} )";
-    code_ += "if not foffset: return " + field.value.constant;
-    code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_start + foffset )";
+    code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
+    code_ += "if not field_start: return " + field.value.constant;
+    code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( field_start )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1838,13 +1874,14 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
+    code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
+
     if (IsBuiltinStruct(type)) {
-      code_ += "return get_{{GODOT_TYPE}}( {{OFFSET_NAME}} )";
+      code_ += "return decode_variant( field_start, {{VARIANT_TYPE}} )";
     } else {
       code_.SetValue("INCLUDE", GetInclude(type));
-      code_ += "var field_offset: int = get_field_offset( {{OFFSET_NAME}} )";
-      code_ += "if not field_offset: return null";
-      code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, _fb_start + field_offset )";
+      code_ += "if not field_start: return null";
+      code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
     }
     code_.DecrementIdentLevel();
     code_ += "";
@@ -1863,10 +1900,10 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
     if (IsBuiltinStruct(type)) {
-      code_ += "return decode_{{GODOT_TYPE}}( field_start )";
+      code_ += "return decode_variant( field_start, {{VARIANT_TYPE}} )";
     } else {
       code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
     }
@@ -1884,14 +1921,14 @@ public:
     code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
-    code_.IncrementIdentLevel();
-    code_ += "var foffset: int = get_field_offset( {{OFFSET_NAME}} )";
-    code_ += "if not foffset: return " + field.value.constant + " as {{GODOT_TYPE}}";
-    //TODO The reflection.fbs uses the bitflags attribute for "AdvancedFeatures"
-    // Which would trigger the output of this function to be expressed as int.
-    code_ += "var decoded: {{GODOT_TYPE}} = _fb_bytes.decode_{{PBA_SUFFIX}}( _fb_start + foffset )";
-    code_ += "return decoded";
-    code_.DecrementIdentLevel();
+    code_.IncrementIdentLevel(); {
+      code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
+      code_ += "if not field_start: return " + field.value.constant + " as {{GODOT_TYPE}}";
+      //TODO The reflection.fbs uses the bitflags attribute for "AdvancedFeatures"
+      // Which would trigger the output of this function to be expressed as int.
+      code_ += "var decoded: {{GODOT_TYPE}} = _fb_bytes.decode_{{PBA_SUFFIX}}( field_start )";
+      code_ += "return decoded";
+    } code_.DecrementIdentLevel();
     code_ += "";
   }
 
@@ -1919,7 +1956,7 @@ public:
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> Variant:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return null";
 
     // match the type
@@ -1936,7 +1973,7 @@ public:
       code_ += "{{INCLUDE}}{{ENUM_TYPE}}.{{ENUM_VALUE}}:";
       code_.IncrementIdentLevel();
       if (IsBuiltinStruct(type)) {
-        code_ += "return decode_{{GODOT_TYPE}}( field_start )";
+        code_ += "return decode_variant( field_start, {{VARIANT_TYPE}} )";
       } else {
         code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
       }
@@ -1958,9 +1995,9 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_field_start( {{OFFSET_NAME}} )";
+    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
     code_ += "if not field_start: return ''";
-    code_ += "return decode_String( field_start )";
+    code_ += "return decode_variant( field_start, TYPE_STRING )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -1979,7 +2016,9 @@ public:
     code_.SetValue("FIELD_NAME", Name(field));
     code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
+    code_.SetValue("VARIANT_TYPE", "TYPE_" + ConvertCase(GetGodotType(type), Case::kAllUpper));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
+
 
     // Handle vectors elsewhere.
     if (IsSeries(type)) {
@@ -2113,6 +2152,8 @@ public:
       code_.SetValue("PARAM_NAME", Name(*field) + (is_inline ? "" : "_offset"));
       code_.SetValue("INCLUDE", IsStruct(type) ? include_map[type.struct_def->file] : "");
       code_.SetValue("PARAM_TYPE", is_inline ? GetGodotType(type) : "int");
+      code_.SetValue("PARAM_VARIANT_TYPE", "TYPE_" + ConvertCase(GetGodotType(type), Case::kAllUpper));
+
       code_.SetValue("VALUE_DEFAULT", is_default_scalar ? field->value.constant : "");
 
       // Function Signature
@@ -2141,7 +2182,7 @@ public:
       }
       else if (IsStruct(type)) {
         if (IsBuiltinStruct(type)) {
-          code_ += "fbb_.add_{{PARAM_TYPE}}( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}} )";
+          code_ += "fbb_.add_variant( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}}, {{PARAM_VARIANT_TYPE}} )";
         } else {
           code_ += "fbb_.add_bytes( {{STRUCT_NAME}}.{{FIELD_OFFSET}}, {{PARAM_NAME}}._fb_bytes ) ";
           /* FIXME The function "overwrite_bytes()" returns a value that will be discarded if not used.
