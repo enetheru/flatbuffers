@@ -826,6 +826,9 @@ public:
     code_ += "# underlying_type: \\";
     code_ += TypeName(enum_def->underlying_type.base_type);
 
+    for( const auto val :  enum_def->Vals()) {
+      code_ += "#\t" + val->name + ":" +  std::to_string(val->GetAsInt64());
+    }
   }
 
 
@@ -1590,7 +1593,7 @@ public:
     }
     code_.IncrementIdentLevel();
     code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
-    code_ += "assert(field_start, 'Field is not present in buffer' )\n";
+    code_ += "assert(field_start, 'Field \"{{FIELD_NAME}}\" is not present in buffer' )\n";
 
     code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
     code_ += "assert( idx < array_size, 'index is out of bounds')\n";
@@ -1622,7 +1625,7 @@ public:
     code_ += "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> {{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel(); {
       code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
-      code_ += "assert(field_start, 'Field is not present in buffer' )\n";
+      code_ += "assert(field_start, 'Field \"{{FIELD_NAME}}\" is not present in buffer' )\n";
 
       code_ += "# The field is a vector of table, so the inline data is a vector of";
       code_ += "# offsets to the element location.\n";
@@ -1742,9 +1745,49 @@ public:
   void GenFieldVectorUnionGet(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    // UNION_NAME is set in GenFieldVector
+    const auto enum_def = field.value.type.enum_def;
+    // code_.SetValue("UNION_TYPE", enum_def->name ); //Name of Union
+    // TODO Might have to move to the enum_def->Vals()->union_type to get information on
+    //  the underlying class that the union enum value represents.
+
     GenComment(field.doc_comment, "#");
-    code_ += "# TODO GenFieldVectorUnionGet ";
-    code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
+    code_ += "func {{FIELD_NAME}}() -> Array:";
+    code_.IncrementIdentLevel(); {
+      code_ += "var field_start: int = get_offset_field_start( VT_UNIONS )";
+      code_ += "assert(field_start, 'Field \"{{FIELD_NAME}}\" is not present in buffer' )\n";
+
+      code_ += "# The field is a vector of union, to decode the";
+      code_ += "# content, we need to use the paired union_type vector";
+      code_ += "var types:PackedByteArray = {{FIELD_NAME}}_type()";
+      code_ += "assert(not types.is_empty(), '{{FIELD_NAME}}_types is empty' )\n";
+
+      code_ += "# The inline data is a vector of offsets to the element location.";
+      code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
+      code_ += "var array_start: int = field_start + 4 # sizeof(uint32_t)\n";
+
+      code_ += "var result:Array = []";
+      code_ += "if result.resize(array_size):";
+        code_ += "\tassert(false, 'Failure to resize result array.')\n";
+
+      code_ += "for i in array_size:";
+      code_.IncrementIdentLevel(); {
+        code_ += "var type:{{UNION_NAME}} = types[i] as {{UNION_NAME}}";
+        code_ += "var element_pos: int = array_start + i * 4";
+        code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
+        code_ += "match type:";
+        code_.IncrementIdentLevel(); {
+          for ( const auto val : enum_def->Vals()) {
+            if (val->IsZero()) continue;
+            code_.SetValue("UNION_VALUE_CLASS", val->name); //Name of Union
+            code_.SetValue("UNION_VALUE_NAME", ConvertCase(val->name, Case::kScreamingSnake) ); //Name of Union
+            code_ += "{{UNION_NAME}}.{{UNION_VALUE_NAME}}:";
+            code_ += "\tresult[i] = {{INCLUDE}}{{UNION_VALUE_CLASS}}.new( _fb_bytes, element_pos + element_offset )";
+          }
+        } code_.DecrementIdentLevel();
+      } code_.DecrementIdentLevel();
+      code_ += "return result";
+    } code_.DecrementIdentLevel();
     code_ += "";
     if (opts_.gdscript_debug) {
       GenFieldDebug(field);
@@ -1754,9 +1797,44 @@ public:
   void GenFieldVectorUnionAt(const FieldDef &field [[maybe_unused]]) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    // UNION_NAME is set in GenFieldVector
+    const auto enum_def = field.value.type.enum_def;
     GenComment(field.doc_comment, "#");
-    code_ += "# TODO GenFieldVectorUnionAt ";
-    code_ += "# {{FIELD_NAME}}: {{GODOT_TYPE}} ";
+    code_ += "func {{FIELD_NAME}}_at( idx: int, into: Variant = null ) -> Variant:";
+    code_.IncrementIdentLevel(); {
+      code_ += "var field_start: int = get_offset_field_start( VT_UNIONS )";
+      code_ += "assert(field_start, 'Field \"{{FIELD_NAME}}\" is not present in buffer' )\n";
+
+      code_ += "# The field is a vector of union, to decode the";
+      code_ += "# content, we need to use the paired *_type vector";
+      code_ += "var type:{{UNION_NAME}} = {{FIELD_NAME}}_type_at(idx)";
+      code_ += "assert(type, '{{FIELD_NAME}}_type is null' )\n";
+
+      code_ += "# The inline data is a vector of offsets to the element location.";
+      code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
+      code_ += "assert( idx < array_size, 'index is out of bounds')\n";
+
+      code_ += "var array_start: int = field_start + 4 # (siseof uint32_t)";
+      code_ += "var element_pos: int = array_start + idx * 4";
+      code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
+      code_ += "if into:";
+      code_.IncrementIdentLevel(); {
+        code_ += "into._fb_bytes = _fb_bytes";
+        code_ += "into._fb_start = element_pos + element_offset";
+        code_ += "return into\n";
+      } code_.DecrementIdentLevel();
+      code_ += "match type:";
+      code_.IncrementIdentLevel(); {
+        for ( const auto val : enum_def->Vals()) {
+          if (val->IsZero()) continue;
+          code_.SetValue("UNION_VALUE_NAME", ConvertCase(val->name, Case::kScreamingSnake) ); //Name of Union
+          code_.SetValue("UNION_VALUE_CLASS", val->name); //Name of Union
+          code_ += "{{UNION_NAME}}.{{UNION_VALUE_NAME}}:";
+          code_ += "\treturn {{INCLUDE}}{{UNION_VALUE_CLASS}}.new( _fb_bytes, element_pos + element_offset )";
+        }
+      } code_.DecrementIdentLevel();
+      code_ += "return null";
+    } code_.DecrementIdentLevel();
     code_ += "";
     if (opts_.gdscript_debug) {
       GenFieldDebug(field);
@@ -1826,6 +1904,8 @@ public:
       GenFieldVectorStringAt( field );
     }
     else if (IsUnion(element)) {
+      const auto enum_def = field.value.type.enum_def;
+      code_.SetValue("UNION_NAME", enum_def->name ); //Name of Union Enum
       GenFieldVectorUnionGet( field );
       GenFieldVectorUnionAt( field );
     }
