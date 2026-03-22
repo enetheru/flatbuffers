@@ -796,6 +796,51 @@ public:
     code_ += "#  ---- ";
   }
 
+  void GenStructDebug(const StructDef *def) {
+    GenDefinitionDebug(def);
+    code_ += "# StructDef";
+
+    // SymbolTable<FieldDef> fields;
+    code_ += "#  fields:";
+    code_.IncrementIdentLevel();
+    for ( const auto &[name,field] : def->fields.dict ) {
+      code_ += "# " + name;
+      code_.IncrementIdentLevel();
+      GenFieldDebug(*field);
+      code_.DecrementIdentLevel();
+    }
+    code_.DecrementIdentLevel();
+
+    // bool fixed;       // If it's struct, not a table.
+    code_ += "#  fixed = \\";
+    code_ += def->fixed ? "true" : "false";
+    // bool predecl;     // If it's used before it was defined.
+    code_ += "#  predecl = \\";
+    code_ += def->predecl ? "true" : "false";
+    // bool sortbysize;  // Whether fields come in the declaration or size order.
+    code_ += "#  sortbysize = \\";
+    code_ += def->sortbysize ? "true" : "false";
+    // bool has_key;     // It has a key field.
+    code_ += "#  has_key = \\";
+    code_ += def->has_key ? "true" : "false";
+    // size_t minalign;  // What the whole object needs to be aligned to.
+    code_ += "#  minalign = " + NumToString(def->minalign);
+    // size_t bytesize;  // Size if fixed.
+    code_ += "#  bytesize = " + NumToString(def->bytesize);
+
+    // CycleStatus cycle_status;  // used for determining if we have circular references
+    code_ += "#  cycle_status = ?"; // + NumToString(def->cycle_status);
+
+    // flatbuffers::unique_ptr<std::string> original_location;
+    // std::vector<voffset_t> reserved_ids;
+    code_ += "#  reserved_ids:";
+    for ( const auto reserved_id: def->reserved_ids) {
+      code_ +=  NumToString(reserved_id);
+    }
+
+    code_ += "#  ---- ";
+  }
+
   void GenEnumDebug(const EnumDef *enum_def) {
     GenDefinitionDebug( enum_def );
     code_ += "# EnumDev Debug";
