@@ -46,11 +46,11 @@ namespace gdscript {
   TD(FLOAT,    "float",  float,          float,   "float",      "to_float32_array",      PackedFloat32Array, 11) /* begin float */ \
   TD(DOUBLE,   "double", double,         float,   "double",     "to_float64_array",      PackedFloat64Array, 12) /* end float/scalar */
 #define GODOT_GEN_TYPES_POINTER(TD) \
-  TD(STRING,   "string", Offset<void>,   String,  "",           "get_string_from_utf8",  PackedStringArray,  13) \
-  TD(VECTOR,   "",       Offset<void>,   Array,   "",           "",                      Array,              14) \
-  TD(VECTOR64, "",       Offset64<void>, Array,   "",           "",                      Array,              18) \
-  TD(STRUCT,   "",       Offset<void>,   int,     "",           "",                      Array,              15) \
-  TD(UNION,    "",       Offset<void>,   Variant, "",           "",                      Array,              16)
+  TD(STRING,   "string", Offset<void>,   String,  "u32",        "get_string_from_utf8",  PackedStringArray,  13) \
+  TD(VECTOR,   "",       Offset<void>,   Array,   "u32",        "",                      Array,              14) \
+  TD(VECTOR64, "",       Offset64<void>, Array,   "u32",        "",                      Array,              18) \
+  TD(STRUCT,   "",       Offset<void>,   int,     "u32",        "",                      Array,              15) \
+  TD(UNION,    "",       Offset<void>,   Variant, "u32",        "",                      Array,              16)
 #define GODOT_GEN_TYPE_ARRAY(TD) \
   TD(ARRAY,    "",       int,            Array,   "",           "",                      Array,              17)
 
@@ -1270,19 +1270,16 @@ public:
     // TODO set document comment
     GenComment({
       " TODO: create a useful doc comment for the init function"}, "#");
-    code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
-    code_.IncrementIdentLevel();
-    code_ += "if bytes_.is_empty(): ";
-    code_.IncrementIdentLevel();
-    code_ += "_fb_bytes = PackedByteArray()";
-    code_ += "_fb_bytes.resize( _fb_struct_size )";
-    code_.DecrementIdentLevel();
-    code_ += "else:";
-    code_.IncrementIdentLevel();
-    code_ += "assert(start_ + _fb_struct_size <= bytes_.size())";
-    code_ += "_fb_bytes = bytes_; _fb_start = start_";
-    code_.DecrementIdentLevel();
-    code_.DecrementIdentLevel();
+    code_ += "func _init( packed_bytes: PackedByteArray = [], offset: int = 0) -> void:";
+    code_.IncrementIdentLevel(); {
+      code_ += "if packed_bytes.is_empty():";
+      code_.IncrementIdentLevel(); {
+        code_ += "packed_bytes = PackedByteArray()";
+        code_ += "packed_bytes.resize( _fb_struct_size )";
+      } code_.DecrementIdentLevel();
+      code_ += "assert(offset + _fb_struct_size <= packed_bytes.size())";
+      code_ += "assign_buffer( packed_bytes, offset )";
+    } code_.DecrementIdentLevel();
     code_ += "";
   }
 
@@ -1651,8 +1648,7 @@ public:
     } else {
       code_ += "if into:";
       code_.IncrementIdentLevel();
-      code_ += "into._fb_bytes = _fb_bytes";
-      code_ += "into._fb_start = element_offset";
+      code_ += "into.assign_buffer(_fb_bytes, element_offset)";
       code_ += "return into";
       code_.DecrementIdentLevel();
       code_ += "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, element_offset )";;
@@ -1683,8 +1679,7 @@ public:
       code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
       code_ += "if into:";
       code_.IncrementIdentLevel(); {
-        code_ += "into._fb_bytes = _fb_bytes";
-        code_ += "into._fb_start = element_pos + element_offset";
+        code_ += "into.assign_buffer(_fb_bytes, element_pos + element_offset)";
         code_ += "return into";
         code_.DecrementIdentLevel();
       }
@@ -1692,6 +1687,25 @@ public:
       code_.DecrementIdentLevel();
     }
     code_ += "";
+  }
+
+
+  void GenFieldVectorTableVerify(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    GenComment(field.doc_comment, "#");
+    // func {{FIELD_NAME}}() -> Array|PackedArray
+    code_ += "func verify_{{FIELD_NAME}}(verifier:FlatBufferVerifier) -> bool:";
+
+    code_.IncrementIdentLevel(); {
+      code_ += "var tmp := {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new()";
+      code_ += "for i in {{FIELD_NAME}}_size():";
+      code_ += "\tif not {{FIELD_NAME}}_at(i, tmp).verify(verifier):";
+      code_ += "\t\treturn false";
+      code_ += "return true";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    }
   }
 
   /*MARK: GenFieldVectorTable
@@ -1864,8 +1878,7 @@ public:
       code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
       code_ += "if into:";
       code_.IncrementIdentLevel(); {
-        code_ += "into._fb_bytes = _fb_bytes";
-        code_ += "into._fb_start = element_pos + element_offset";
+        code_ += "into.assign_buffer( _fb_bytes, element_pos + element_offset)";
         code_ += "return into\n";
       } code_.DecrementIdentLevel();
       code_ += "match type:";
@@ -1923,36 +1936,37 @@ public:
     code_.SetValue("ELEMENT_SIZE", NumToString(SizeOf(element.base_type)));
     code_.SetValue("PBASUFFIX", gdPBASuffix(element.base_type));
 
-    // The size is the same for all vector fields.
-    // We can skip the UnionType as it is a duplicate
-    if (!IsUnionType(element)) {
-      GenFieldVectorSize(field);
-    }
-
-    // it looks like that vectors of union are expressed as two separate fields
-    // But we dont wantt o duplicate presence, and size.
-
     if (IsScalar(element.base_type)) {
-      GenFieldVectorScalarGet( field );
+      GenFieldVectorSize(field);
       GenFieldVectorScalarAt( field );
+      GenFieldVectorScalarGet( field );
     }
     else if (IsStruct(element)) {
-      GenFieldVectorStructGet( field );
+      GenFieldVectorSize(field);
       GenFieldVectorStructAt( field );
+      GenFieldVectorStructGet( field );
     }
     else if (IsTable(element)) {
-      GenFieldVectorTableGet( field );
+      GenFieldVectorTableVerify( field );
+      GenFieldVectorSize(field);
       GenFieldVectorTableAt( field );
+      GenFieldVectorTableGet( field );
     }
     else if (IsString(element)) {
-      GenFieldVectorStringGet( field );
+      GenFieldVectorSize(field);
       GenFieldVectorStringAt( field );
+      GenFieldVectorStringGet( field );
     }
     else if (IsUnion(element)) {
       const auto enum_def = field.value.type.enum_def;
       code_.SetValue("UNION_NAME", enum_def->name ); //Name of Union Enum
-      GenFieldVectorUnionGet( field );
+      // it looks like that vectors of union are expressed as two separate fields
+      // But we dont wantt o duplicate presence, and size.
+      if (!IsUnionType(element)) {
+        GenFieldVectorSize(field);
+      }
       GenFieldVectorUnionAt( field );
+      GenFieldVectorUnionGet( field );
     }
     else {
       if (opts_.gdscript_debug) {
@@ -2177,11 +2191,152 @@ public:
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
     GenComment({
       " TODO: create a useful doc comment for the init function"}, "#");
-    code_ += "func _init( bytes_: PackedByteArray = [], start_: int = 0) -> void:";
+    code_ += "func _init( packed_bytes: PackedByteArray = [], offset: int = 0) -> void:";
     code_.IncrementIdentLevel();
-    code_ += "_fb_bytes = bytes_; _fb_start = start_";
+    code_ += "assign_buffer( packed_bytes, offset )";
     code_.DecrementIdentLevel();
     code_ += "";
+  }
+
+  // Init function to prevent a rather spicy footgun
+  void GenTableVerifier(const StructDef &struct_def[[maybe_unused]]) {
+    GenComment({
+      " TODO: create a useful doc comment for the verify function"}, "#");
+    code_ += "func verify(verifier:FlatBufferVerifier) -> bool:";
+    code_.IncrementIdentLevel(); {
+      code_ += "verifier.set_buffer(_fb_bytes)";
+      code_ += "return (";
+      code_.IncrementIdentLevel(); {
+        code_ += "verify_table_start(verifier)";
+        for (const auto& field : struct_def.fields.vec) {
+          if (field->deprecated) continue;
+          GenVerifyCall(*field);
+        }
+        code_ += "and verify_end_table(verifier)";
+      } code_.DecrementIdentLevel();
+      code_ += ")";
+    } code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
+    // Generate the code to call the appropriate Verify function(s) for a field.
+  void GenVerifyCall(const FieldDef& field) {
+    code_.SetValue("NAME", Name(field));
+    code_.SetValue("REQUIRED", field.IsRequired() ? "Required" : "");
+    code_.SetValue("SCALAR_SUFFIX", gdPBASuffix(field.value.type.base_type));
+    code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
+    // code_.SetValue("SIZE", GenTypeSize(field.value.type));
+    // code_.SetValue("OFFSET", GenFieldOffsetName(field));
+
+    if (IsScalar(field.value.type.base_type)) {
+      code_.SetValue("ALIGN", NumToString(InlineAlignment(field.value.type)));
+      code_ += "and verify_field_{{SCALAR_SUFFIX}}(verifier, {{OFFSET_NAME}}, {{ALIGN}})";
+    } else if (IsStruct(field.value.type)) {
+      if (IsBuiltinStruct(field.value.type)) {
+        code_.SetValue("VARIANT_TYPE", "TYPE_" + ConvertCase(GetGodotType(field.value.type), Case::kAllUpper));
+        code_ += "and verify_variant(verifier, {{OFFSET_NAME}}, {{VARIANT_TYPE}})";
+      } else {
+        code_.SetValue("ALIGN", NumToString(InlineAlignment(field.value.type)));
+        code_ += "# FIXME: custom struct";
+        code_ += "#  and verify_field<was templated>{{SCALAR_SUFFIX}}(verifier, {{OFFSET_NAME}}, {{ALIGN}})";
+      }
+    } else {
+      code_.SetValue("OFFSET_SIZE", field.offset64 ? "64" : "");
+      code_ += "and verify_offset{{OFFSET_SIZE}}{{REQUIRED}}(verifier, {{OFFSET_NAME}})";
+    }
+
+    switch (field.value.type.base_type) {
+      case BASE_TYPE_UNION: {
+        code_.SetValue("ENUM_NAME", field.value.type.enum_def->name);
+        code_.SetValue("SUFFIX", UnionTypeFieldSuffix());
+        code_ += "# TODO: implement verification for a union";
+        code_ += "#  and verify_{{ENUM_NAME}}(verifier, {{NAME}}(), {{NAME}}{{SUFFIX}}())";
+        break;
+      }
+      case BASE_TYPE_STRUCT: { // Tables
+        if (!field.value.type.struct_def->fixed) {
+          code_ += "and {{NAME}}().verify(verifier)";
+        }
+        break;
+      }
+      case BASE_TYPE_STRING: {
+        if (field.value.constant != "0") {
+          if (field.offset64) {
+            code_ +=
+                "# TODO and verify_string_with_default<::flatbuffers::uoffset64_t>("
+                "verifier, "
+                "{{OFFSET}})";
+          } else {
+            code_ += "# TODO and verify_string_with_default(verifier, {{OFFSET_NAME}})";
+          }
+        } else {
+          code_ += "and verify_string( verifier, {{OFFSET_NAME}} )";
+        }
+        break;
+      }
+      case BASE_TYPE_VECTOR64:
+      case BASE_TYPE_VECTOR: {
+        if (field.value.constant == "[]") {
+          const auto& vec_type = field.value.type.VectorType();
+          // const std::string vtype_wire = GenTypeWire(
+          //     vec_type, "", VectorElementUserFacing(vec_type), field.offset64);
+          const std::string vtype_wire = "vtype_wire";
+          std::string verify_call;
+          if (field.offset64) {
+            verify_call = "# TODO and verify_vector64_with_default<" + vtype_wire;
+          } else {
+            verify_call = "# TODO and verify_vector_with_default<" + vtype_wire;
+          }
+          if (field.value.type.base_type == BASE_TYPE_VECTOR64) {
+            verify_call += ", ::flatbuffers::uoffset64_t";
+          }
+          verify_call += ">(verifier, {{OFFSET_NAME}})";
+          code_ += verify_call;
+        } else {
+          code_.SetValue("SCALAR_SUFFIX", gdPBASuffix(field.value.type.element));
+          code_ += "and verify_vector_{{SCALAR_SUFFIX}}(verifier, {{OFFSET_NAME}})";
+        }
+
+        switch (field.value.type.element) {
+          case BASE_TYPE_STRING: {
+            code_ += "# TODO and verifier.verify_vector_of_strings({{NAME}}())";
+            break;
+          }
+          case BASE_TYPE_STRUCT: {
+            if (!field.value.type.struct_def->fixed) {
+              code_ += "and verify_{{NAME}}(verifier)";
+            }
+            break;
+          }
+          case BASE_TYPE_UNION: {
+            code_.SetValue("ENUM_NAME", field.value.type.enum_def->name);
+            code_ +=
+                "# TODO and verify_{{ENUM_NAME}}_vector(verifier, {{NAME}}(), "
+                "{{NAME}}_type())";
+            break;
+          }
+          default:
+            break;
+        }
+
+        const std::string nfn = field.nested_flatbuffer ?  "NestedFlatBufferName" : ""; // GetNestedFlatBufferName(field);
+        if (!nfn.empty()) {
+          code_.SetValue("CPP_NAME", nfn);
+          // FIXME: file_identifier.
+          code_ +=
+              "# TODO and verifier.template VerifyNestedFlatBuffer<{{CPP_NAME}}>"
+              "({{NAME}}(), nullptr)";
+        } else if (field.flexbuffer) {
+          code_ +=
+              "# TODO flexbuffers::VerifyNestedFlexBuffer"
+              "({{NAME}}(), verifier)";
+        }
+        break;
+      }
+      default: {
+        break;
+      }
+    }
   }
 
   /*MARK: Gen Table
@@ -2205,6 +2360,7 @@ public:
     GenStructIncludes(struct_def);
     GenVtableEnums(struct_def);
     GenTableInit(struct_def);
+    GenTableVerifier(struct_def);
 
     // Generate the accessors.
     for (const FieldDef *field : struct_def.fields.vec) {
