@@ -1567,19 +1567,15 @@ public:
   void GenFieldVectorStructGet(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
-    const auto &type = field.value.type;
-    const Type element = type.VectorType();
-    const auto struct_def = element.struct_def;
-    const bool is_packed = packed_structs.find(struct_def->name) != packed_structs.end();
-
-    code_.SetValue("ELEMENT_SIZE", NumToString( struct_def->bytesize) );
-    code_.SetValue("ELEMENT_TYPE", GetGodotType(element) );
-    code_.SetValue("ELEMENT_TYPE_LC", ConvertCase(GetGodotType(element), Case::kAllLower) );
+    // ELEMENT_SIZE, ELEMENT_TYPE, ELEMENT_TYPE_LC were set just before this call.
+    const auto &element = field.value.type.VectorType();
+    const bool is_packed = packed_structs.find(element.struct_def->name) != packed_structs.end();
     if (is_packed) {
       code_.SetValue("GODOT_TYPE", "Packed" + GetGodotType(element) + "Array");
     } else {
       code_.SetValue("GODOT_TYPE", "Array[" + GetGodotType(element) + "]");
     }
+
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
@@ -1942,6 +1938,9 @@ public:
       GenFieldVectorScalarGet( field );
     }
     else if (IsStruct(element)) {
+      code_.SetValue("ELEMENT_SIZE", NumToString( element.struct_def->bytesize) );
+      code_.SetValue("ELEMENT_TYPE", GetGodotType(element) );
+      code_.SetValue("ELEMENT_TYPE_LC", ConvertCase(GetGodotType(element), Case::kAllLower) );
       GenFieldVectorSize(field);
       GenFieldVectorStructAt( field );
       GenFieldVectorStructGet( field );
@@ -2187,6 +2186,13 @@ public:
     }
   }
 
+  /*MARK: Gen Table
+  ║  ___            _____     _    _
+  ║ / __|___ _ _   |_   _|_ _| |__| |___
+  ║| (_ / -_) ' \    | |/ _` | '_ \ / -_)
+  ║ \___\___|_||_|   |_|\__,_|_.__/_\___|
+  ╙───────────────────────────────────────*/
+
   // Init function to prevent a rather spicy footgun
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
     GenComment({
@@ -2242,7 +2248,10 @@ public:
       }
     } else {
       code_.SetValue("OFFSET_SIZE", field.offset64 ? "64" : "");
-      code_ += "and verify_offset{{OFFSET_SIZE}}{{REQUIRED}}(verifier, {{OFFSET_NAME}})";
+      if (field.IsRequired()) {
+        code_ += "# TODO required field";
+      }
+      code_ += "and verify_offset{{OFFSET_SIZE}}(verifier, {{OFFSET_NAME}})";
     }
 
     switch (field.value.type.base_type) {
@@ -2339,12 +2348,6 @@ public:
     }
   }
 
-  /*MARK: Gen Table
-  ║  ___            _____     _    _
-  ║ / __|___ _ _   |_   _|_ _| |__| |___
-  ║| (_ / -_) ' \    | |/ _` | '_ \ / -_)
-  ║ \___\___|_||_|   |_|\__,_|_.__/_\___|
-  ╙───────────────────────────────────────*/
   // Generate an accessor struct
   void GenTable(const StructDef &struct_def) {
     // Generate classes to access the table fields
