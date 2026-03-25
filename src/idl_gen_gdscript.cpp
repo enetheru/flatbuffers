@@ -227,6 +227,10 @@ public:
     code_ += "# " + std::string(FlatBuffersGeneratedWarning());
     code_ += "";
 
+    if (parser_.known_attributes_.find("tool" ) != parser_.known_attributes_.end()) {
+      code_ += "@tool";
+    }
+
 // TODO, rather than have this unsafe method access, we could use a gdscript based
 //       getter which performs the conversion from Variant to PackedByteArray
     code_ += "# To maintain reference counted PackedByteArray the gdextension type for data";
