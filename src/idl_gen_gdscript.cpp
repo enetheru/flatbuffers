@@ -800,6 +800,7 @@ public:
     code_ += "#  ---- ";
   }
 
+  //MARK: GenStructDebug
   void GenStructDebug(const StructDef *def) {
     GenDefinitionDebug(def);
     code_ += "# StructDef";
@@ -845,6 +846,7 @@ public:
     code_ += "#  ---- ";
   }
 
+  //MARK: GenEnumDebug
   void GenEnumDebug(const EnumDef *enum_def) {
     GenDefinitionDebug( enum_def );
     code_ += "# EnumDev Debug";
@@ -880,7 +882,7 @@ public:
     }
   }
 
-
+  //MARK: GenTypeDebug
   void GenTypeDebug( const Type &type ) {
     //    BaseType base_type;
     code_ += "#  base_type: \\";
@@ -2208,6 +2210,7 @@ public:
     code_ += "";
   }
 
+  //MARK: GenTableVerifier
   // Init function to prevent a rather spicy footgun
   void GenTableVerifier(const StructDef &struct_def[[maybe_unused]]) {
     GenComment({
@@ -2229,6 +2232,7 @@ public:
     code_ += "";
   }
 
+  //MARK: GenVerifyCall
     // Generate the code to call the appropriate Verify function(s) for a field.
   void GenVerifyCall(const FieldDef& field) {
     code_.SetValue("NAME", Name(field));
@@ -2352,6 +2356,7 @@ public:
     }
   }
 
+  //MARK: GenTable
   // Generate an accessor struct
   void GenTable(const StructDef &struct_def) {
     // Generate classes to access the table fields
