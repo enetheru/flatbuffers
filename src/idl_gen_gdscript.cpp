@@ -1111,7 +1111,7 @@ public:
     code_.SetValue("UNION_LCNAME", ConvertCase(Name(enum_def), Case::kSnake, Case::kUpperCamel));
 
 
-    GenComment( {" TODO: create a doc comment for the verify_{{ENUM_NAME}} function"}, "#");
+    GenComment( {" Verify the integrity of the {{ENUM_NAME}} union data"}, "#");
     code_ += "static func {{UNION_LCNAME}}_verify(verifier:FlatBufferVerifier, value:Variant, type:{{ENUM_NAME}}) -> bool: ";
     code_.IncrementIdentLevel();
     {
@@ -1148,7 +1148,7 @@ public:
 
 
     GenComment(
-      {" TODO: create a doc comment for the get_{{STRUCT_NAME}} function"}, "#");
+      {" Get the {{STRUCT_NAME}} from the provided [param _bytes]"}, "#");
     code_ += "static func get_{{STRUCT_NAME}}( _bytes: PackedByteArray ) -> {{STRUCT_NAME}}:";
     code_.IncrementIdentLevel();
     code_ += "assert(not _bytes.is_empty())";
@@ -1166,7 +1166,7 @@ public:
   void GenStructCreate(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
     GenComment({
-      " TODO: create a useful doc comment for the static creation function"}, "#");
+      " Create a new {{STRUCT_NAME}} with the provided field values"}, "#");
     code_ += "static func create_{{STRUCT_NAME}}(";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
@@ -1309,9 +1309,8 @@ public:
   ╙──────────────────────────────────────────────────────*/
   // Init function to prevent a rather spicy footgun
   void GenStructInit(const StructDef &struct_def[[maybe_unused]]) {
-    // TODO set document comment
     GenComment({
-      " TODO: create a useful doc comment for the init function"}, "#");
+      " Initialize the {{STRUCT_NAME}} with the provided [param packed_bytes] at the given [param offset]"}, "#");
     code_ += "func _init( packed_bytes: PackedByteArray = [], offset: int = 0) -> void:";
     code_.IncrementIdentLevel(); {
       code_ += "if packed_bytes.is_empty():";
@@ -2147,7 +2146,7 @@ public:
   void GenFieldUnion( const FieldDef &field ) {
     // Generate the type accessor first.
     field.sibling_union_field->doc_comment = {
-      " TODO: Write a doc comment for the union_type accessor"
+      " Get the union type of the {{FIELD_NAME}} field"
     };
     GenFieldEnum( *field.sibling_union_field );
 
@@ -2263,7 +2262,7 @@ public:
   // Init function to prevent a rather spicy footgun
   void GenTableInit(const StructDef &struct_def[[maybe_unused]]) {
     GenComment({
-      " TODO: create a useful doc comment for the init function"}, "#");
+      " Initialize the {{STRUCT_NAME}} with the provided [param packed_bytes] at the given [param offset]"}, "#");
     code_ += "func _init( packed_bytes: PackedByteArray = [], offset: int = 0) -> void:";
     code_.IncrementIdentLevel();
     code_ += "assign_buffer( packed_bytes, offset )";
@@ -2275,7 +2274,7 @@ public:
   // Init function to prevent a rather spicy footgun
   void GenTableVerifier(const StructDef &struct_def[[maybe_unused]]) {
     GenComment({
-      " TODO: create a useful doc comment for the verify function"}, "#");
+      " Verify the integrity of the {{STRUCT_NAME}} data"}, "#");
     code_ += "func verify(verifier:FlatBufferVerifier) -> bool:";
     code_.IncrementIdentLevel(); {
       code_ += "verifier.set_buffer(_fb_bytes)";
@@ -2470,7 +2469,7 @@ public:
     code_.SetValue("STRUCT_NAME", Name(struct_def));
 
     // Generate a builder struct:
-    GenComment({" TODO: Write a Doc Comment for the builder"}, "#");
+    GenComment({" Builder class for {{STRUCT_NAME}}"}, "#");
     code_ += "class {{STRUCT_NAME}}Builder extends RefCounted:";
     code_.IncrementIdentLevel();
     code_ += "var fbb_: FlatBufferBuilder";
@@ -2478,7 +2477,7 @@ public:
     code_ += "";
 
     // Add init function
-    GenComment({" TODO: Write a Doc Comment for the builder's init function"}, "#");
+    GenComment({" Initialize the builder with the provided [param _fbb]"}, "#");
     code_ += "func _init( _fbb: FlatBufferBuilder ) -> void:";
     code_.IncrementIdentLevel();
     code_ += "fbb_ = _fbb";
@@ -2510,7 +2509,7 @@ public:
       code_.SetValue("VALUE_DEFAULT", is_default_scalar ? field->value.constant : "");
 
       // Function Signature
-      GenComment({" TODO: Write a Doc Comment for the builder's add functions"}, "#");
+      GenComment({" Add the {{FIELD_NAME}} field to the {{STRUCT_NAME}} table"}, "#");
       code_ += "func add_{{FIELD_NAME}}( {{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}} ) -> void:";
       code_.IncrementIdentLevel();
 
@@ -2570,7 +2569,7 @@ public:
 
     // var finish(): -> void
     // ---------------------
-    GenComment({" TODO: Write a Doc Comment for the builder's finish function"}, "#");
+    GenComment({" Finish building the {{STRUCT_NAME}} table and return the offset"}, "#");
     code_ += "func finish() -> int:";
     code_.IncrementIdentLevel();
     code_ += "var end: int = fbb_.end_table( start_ )";
@@ -2600,7 +2599,7 @@ public:
     // to create a table in one go.
     code_.SetValue("TABLE_NAME", Name(struct_def));
 
-    GenComment({" TODO: Write a Doc Comment for the static table create function"}, "#");
+    GenComment({" Create a {{TABLE_NAME}} table in one go using the provided [param _fbb]"}, "#");
     code_ += "static func create_{{TABLE_NAME}}( _fbb: FlatBufferBuilder,";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
