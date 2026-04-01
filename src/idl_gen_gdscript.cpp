@@ -290,6 +290,9 @@ public:
     for (const auto &enum_def : parser_.enums_.vec) {
       if (!enum_def->generated) {
         GenEnum(*enum_def);
+        if (enum_def->is_union) {
+          GenUnionVerifier(*enum_def);
+        }
       }
     }
 
@@ -1082,7 +1085,7 @@ public:
     code_.SetValue("ENUM_NAME", Name(enum_def));
 
     GenComment(enum_def.doc_comment, "#");
-    code_ += "enum " + Name(enum_def) + " {";
+    code_ += "enum {{ENUM_NAME}} {";
     code_.IncrementIdentLevel();
 
     const auto vals = enum_def.Vals();
@@ -1100,6 +1103,39 @@ public:
     code_.DecrementIdentLevel();
     code_ += "}\n";
   }
+
+  //MARK: GenUnionVerifier
+  void GenUnionVerifier(const EnumDef &enum_def) {
+    code_.SetValue("ENUM_NAME", Name(enum_def));
+    code_.SetValue("ENUM_LCNAME", ConvertCase(Name(enum_def), Case::kAllLower));
+    code_.SetValue("UNION_LCNAME", ConvertCase(Name(enum_def), Case::kSnake, Case::kUpperCamel));
+
+
+    GenComment( {" TODO: create a doc comment for the verify_{{ENUM_NAME}} function"}, "#");
+    code_ += "static func {{UNION_LCNAME}}_verify(verifier:FlatBufferVerifier, value:Variant, type:{{ENUM_NAME}}) -> bool: ";
+    code_.IncrementIdentLevel();
+    {
+      code_ += "match type:";
+      code_.IncrementIdentLevel();
+      for ( const EnumVal *val : enum_def.Vals() ) {
+        code_.SetValue("KEY", ConvertCase(Name(*val), Case::kScreamingSnake, Case::kUpperCamel));
+        code_.SetValue("UNION_CLASS", Name(*val));
+        code_.SetValue("UNION_LCCLASS", ConvertCase(Name(*val), Case::kSnake, Case::kUpperCamel));
+        if ( val->IsNonZero() ) {
+          code_ += "{{ENUM_NAME}}.{{KEY}}:";
+          code_.IncrementIdentLevel();
+          code_ += "var {{UNION_LCCLASS}}: {{UNION_CLASS}} = value";
+          code_ += "return {{UNION_LCCLASS}}.verify(verifier)";
+          code_.DecrementIdentLevel();
+        }
+      }
+      code_.DecrementIdentLevel();
+    }
+    code_ += "return false";
+    code_.DecrementIdentLevel();
+    code_ += "";
+  }
+
 
   /*MARK: GenStructGet
   ║  ___          ___ _               _    ___     _
@@ -1281,7 +1317,8 @@ public:
       code_ += "if packed_bytes.is_empty():";
       code_.IncrementIdentLevel(); {
         code_ += "packed_bytes = PackedByteArray()";
-        code_ += "packed_bytes.resize( _fb_struct_size )";
+        code_ += "if packed_bytes.resize( _fb_struct_size ) != OK:";
+        code_ += "\tprinterr('unable to resize byte array')";
       } code_.DecrementIdentLevel();
       code_ += "assert(offset + _fb_struct_size <= packed_bytes.size())";
       code_ += "assign_buffer( packed_bytes, offset )";
@@ -1692,17 +1729,39 @@ public:
   }
 
 
+  // MARK: GenFieldVectorTableVerify
   void GenFieldVectorTableVerify(const FieldDef &field) {
     // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
     // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
     GenComment(field.doc_comment, "#");
     // func {{FIELD_NAME}}() -> Array|PackedArray
-    code_ += "func verify_{{FIELD_NAME}}(verifier:FlatBufferVerifier) -> bool:";
+    code_ += "func {{FIELD_NAME}}_verify(verifier:FlatBufferVerifier) -> bool:";
 
     code_.IncrementIdentLevel(); {
       code_ += "var tmp := {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new()";
       code_ += "for i in {{FIELD_NAME}}_size():";
       code_ += "\tif not {{FIELD_NAME}}_at(i, tmp).verify(verifier):";
+      code_ += "\t\treturn false";
+      code_ += "return true";
+      code_.DecrementIdentLevel();
+      code_ += "";
+    }
+  }
+
+  // MARK: GenFieldVectorUnionVerify
+  void GenFieldVectorUnionVerify(const FieldDef &field) {
+    // FIELD_NAME, GODOT_TYPE, INCLUDE were set in GenField
+    // ELEMENT_INCLUDE, ELEMENT_TYPE, ELEMENT_SIZE, PBASUFFIX were set in GenFieldVector
+    code_.SetValue("INCLUDE", GetInclude( field.value.type) );
+    code_.SetValue("UNION_LCNAME", ConvertCase(Name(*field.value.type.enum_def), Case::kSnake, Case::kUpperCamel));
+    // I also need to get the union_type
+
+    GenComment(field.doc_comment, "#");
+    // func {{FIELD_NAME}}() -> Array|PackedArray
+    code_ += "func {{FIELD_NAME}}_verify(verifier:FlatBufferVerifier) -> bool:";
+    code_.IncrementIdentLevel(); {
+      code_ += "for i:int in {{FIELD_NAME}}_size():";
+      code_ += "\tif not {{INCLUDE}}{{UNION_LCNAME}}_verify(verifier, {{FIELD_NAME}}_at(i), {{FIELD_NAME}}_type_at(i)):";
       code_ += "\t\treturn false";
       code_ += "return true";
       code_.DecrementIdentLevel();
@@ -1966,8 +2025,10 @@ public:
       const auto enum_def = field.value.type.enum_def;
       code_.SetValue("UNION_NAME", enum_def->name ); //Name of Union Enum
       // it looks like that vectors of union are expressed as two separate fields
-      // But we dont wantt o duplicate presence, and size.
+      // But we dont wantt to duplicate presence, and size.
       if (!IsUnionType(element)) {
+        GenPresenceFunc(field);
+        GenFieldVectorUnionVerify( field );
         GenFieldVectorSize(field);
       }
       GenFieldVectorUnionAt( field );
@@ -2265,9 +2326,10 @@ public:
     switch (field.value.type.base_type) {
       case BASE_TYPE_UNION: {
         code_.SetValue("ENUM_NAME", field.value.type.enum_def->name);
+        code_.SetValue("ENUM_LCNAME", ConvertCase(field.value.type.enum_def->name, Case::kAllLower));
         code_.SetValue("SUFFIX", UnionTypeFieldSuffix());
-        code_ += "# TODO: implement verification for a union";
-        code_ += "#  and verify_{{ENUM_NAME}}(verifier, {{NAME}}(), {{NAME}}{{SUFFIX}}())";
+        code_.SetValue("INCLUDE", GetInclude( field.value.type ) );
+        code_ += "and {{INCLUDE}}{{ENUM_LCNAME}}_verify(verifier, {{NAME}}(), {{NAME}}{{SUFFIX}}())";
         break;
       }
       case BASE_TYPE_STRUCT: { // Tables
@@ -2294,7 +2356,7 @@ public:
       case BASE_TYPE_VECTOR64:
       case BASE_TYPE_VECTOR: {
         if (field.value.constant == "[]") {
-          const auto& vec_type = field.value.type.VectorType();
+          // const auto& vec_type = field.value.type.VectorType();
           // const std::string vtype_wire = GenTypeWire(
           //     vec_type, "", VectorElementUserFacing(vec_type), field.offset64);
           const std::string vtype_wire = "vtype_wire";
@@ -2321,15 +2383,14 @@ public:
           }
           case BASE_TYPE_STRUCT: {
             if (!field.value.type.struct_def->fixed) {
-              code_ += "and verify_{{NAME}}(verifier)";
+              code_ += "and {{NAME}}_verify(verifier)";
             }
             break;
           }
           case BASE_TYPE_UNION: {
-            code_.SetValue("ENUM_NAME", field.value.type.enum_def->name);
-            code_ +=
-                "# TODO and verify_{{ENUM_NAME}}_vector(verifier, {{NAME}}(), "
-                "{{NAME}}_type())";
+            // code_.SetValue("ENUM_NAME", field.value.type.enum_def->name);
+            code_.SetValue("TYPE_OFFSET_NAME", "VT_" + ConvertCase(Name(field) + UnionTypeFieldSuffix(), Case::kAllUpper));
+            code_ += "and {{NAME}}_verify(verifier)";
             break;
           }
           default:
@@ -2440,7 +2501,6 @@ public:
       const bool is_default_scalar = is_inline && !field->IsScalarOptional();
 
       code_.SetValue("FIELD_NAME", Name(*field));
-      code_.SetValue("INCLUDE", "");
       code_.SetValue("FIELD_OFFSET", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
       code_.SetValue("PARAM_NAME", Name(*field) + (is_inline ? "" : "_offset"));
       code_.SetValue("INCLUDE", IsStruct(type) ? include_map[type.struct_def->file] : "");
