@@ -2648,7 +2648,7 @@ public:
       if (!field->deprecated && field->IsRequired()) {
         code_.SetValue("FIELD_NAME", Name(*field));
         code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(*field), Case::kAllUpper));
-        code_ += "fbb_.Required(o, {{STRUCT_NAME}}.{{OFFSET_NAME}});";
+        code_ += "fbb_.required(o, {{STRUCT_NAME}}.{{OFFSET_NAME}})";
       }
     }
     code_ += "return o;";
