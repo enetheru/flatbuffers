@@ -2046,6 +2046,7 @@ public:
     code_.SetValue("PBASUFFIX", gdPBASuffix(element.base_type));
 
     if (IsScalar(element.base_type)) {
+      GenPresenceFunc(field);
       GenFieldVectorSize(field);
       GenFieldVectorScalarAt( field );
       GenFieldVectorScalarGet( field );
@@ -2054,17 +2055,20 @@ public:
       code_.SetValue("ELEMENT_SIZE", NumToString( element.struct_def->bytesize) );
       code_.SetValue("ELEMENT_TYPE", GetGodotType(element) );
       code_.SetValue("ELEMENT_TYPE_LC", ConvertCase(GetGodotType(element), Case::kAllLower) );
+      GenPresenceFunc(field);
       GenFieldVectorSize(field);
       GenFieldVectorStructAt( field );
       GenFieldVectorStructGet( field );
     }
     else if (IsTable(element)) {
+      GenPresenceFunc(field);
       GenFieldVectorTableVerify( field );
       GenFieldVectorSize(field);
       GenFieldVectorTableAt( field );
       GenFieldVectorTableGet( field );
     }
     else if (IsString(element)) {
+      GenPresenceFunc(field);
       GenFieldVectorSize(field);
       GenFieldVectorStringAt( field );
       GenFieldVectorStringGet( field );
