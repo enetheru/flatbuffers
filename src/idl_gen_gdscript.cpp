@@ -103,6 +103,55 @@ case BASE_TYPE_##ENUM: return #ARRAY;
   return "";
 }
 
+#define GODOT_TYPE_NAMES(TD) \
+TD(  0, TYPE_NIL,                   null) \
+TD(  1, TYPE_BOOL,                  bool) \
+TD(  2, TYPE_INT,                   int) \
+TD(  3, TYPE_FLOAT,                 float) \
+TD(  4, TYPE_STRING,                String) \
+TD(  5, TYPE_VECTOR2,               Vector2) \
+TD(  6, TYPE_VECTOR2I,              Vector2i) \
+TD(  7, TYPE_RECT2,                 Rect2) \
+TD(  8, TYPE_RECT2I,                Rect2i) \
+TD(  9, TYPE_VECTOR3,               Vector3) \
+TD( 10, TYPE_VECTOR3I,              Vector3i) \
+TD( 11, TYPE_TRANSFORM2D,           Transform2D) \
+TD( 12, TYPE_VECTOR4,               Vector4) \
+TD( 13, TYPE_VECTOR4I,              Vector4i) \
+TD( 14, TYPE_PLANE,                 Plane) \
+TD( 15, TYPE_QUATERNION,            Quaternion) \
+TD( 16, TYPE_AABB,                  AABB) \
+TD( 17, TYPE_BASIS,                 Basis) \
+TD( 18, TYPE_TRANSFORM3D,           Transform3D) \
+TD( 19, TYPE_PROJECTION,            Projection) \
+TD( 20, TYPE_COLOR,                 Color) \
+TD( 21, TYPE_STRING_NAME,           StringName) \
+TD( 22, TYPE_NODE_PATH,             NodePath) \
+TD( 23, TYPE_RID,                   Rid) \
+TD( 24, TYPE_OBJECT,                Object) \
+TD( 25, TYPE_CALLABLE,              Callable) \
+TD( 26, TYPE_SIGNAL,                Signal) \
+TD( 27, TYPE_DICTIONARY,            Dictionary) \
+TD( 28, TYPE_ARRAY,                 Array) \
+TD( 29, TYPE_PACKED_BYTE_ARRAY,     PackedByteArray) \
+TD( 30, TYPE_PACKED_INT32_ARRAY,    PackedInt32Array) \
+TD( 31, TYPE_PACKED_INT64_ARRAY,    PackedInt64Array) \
+TD( 32, TYPE_PACKED_FLOAT32_ARRAY,  PackedFloat32Array) \
+TD( 33, TYPE_PACKED_FLOAT64_ARRAY,  PackedFloat64Array) \
+TD( 34, TYPE_PACKED_STRING_ARRAY,   PackedStringArray) \
+TD( 35, TYPE_PACKED_VECTOR2_ARRAY,  PackedVector2Array) \
+TD( 36, TYPE_PACKED_VECTOR3_ARRAY,  PackedVector3Array) \
+TD( 37, TYPE_PACKED_COLOR_ARRAY,    PackedColorArray) \
+TD( 38, TYPE_PACKED_VECTOR4_ARRAY,  PackedVector4Array) \
+TD( 39, TYPE_VARIANT_MAX,           VariantMax)
+
+static std::string GodotTypeEnum(const std::string &type_string) {
+#define GODOT_TD(INT, ENUM, NAME) \
+if( type_string == #NAME) return #ENUM;
+    GODOT_TYPE_NAMES(GODOT_TD)
+#undef GODOT_TD
+    return "";
+}
 
 // Extension of IDLOptions for gdscript-generator.
 struct IDLOptionsGdscript : public IDLOptions {
@@ -2293,10 +2342,10 @@ public:
   }
 
   //MARK: GenVerifyCall
-    // Generate the code to call the appropriate Verify function(s) for a field.
+  // Generate the code to call the appropriate Verify function(s) for a field.
   void GenVerifyCall(const FieldDef& field) {
     code_.SetValue("NAME", Name(field));
-    code_.SetValue("REQUIRED", field.IsRequired() ? "Required" : "");
+    code_.SetValue("REQUIRED", field.IsRequired() ? "true" : "false");
     code_.SetValue("SCALAR_SUFFIX", gdPBASuffix(field.value.type.base_type));
     code_.SetValue("OFFSET_NAME", "VT_" + ConvertCase(Name(field), Case::kAllUpper));
     // code_.SetValue("SIZE", GenTypeSize(field.value.type));
@@ -2354,6 +2403,11 @@ public:
       }
       case BASE_TYPE_VECTOR64:
       case BASE_TYPE_VECTOR: {
+        // original C++ code uses templated verifier.VerifyVector for the
+        // vector of scalars, offsets and structs then for special cases adds
+        // additional verification after.
+
+        // I have no idea so far what to do with this default business.
         if (field.value.constant == "[]") {
           // const auto& vec_type = field.value.type.VectorType();
           // const std::string vtype_wire = GenTypeWire(
@@ -2371,13 +2425,24 @@ public:
           verify_call += ">(verifier, {{OFFSET_NAME}})";
           code_ += verify_call;
         } else {
-          code_.SetValue("SCALAR_SUFFIX", gdPBASuffix(field.value.type.element));
-          code_ += "and verify_vector_{{SCALAR_SUFFIX}}(verifier, {{OFFSET_NAME}})";
+          // This can also be a struct and I can't use templating like the c++ code uses.
+          if (field.value.type.element == BASE_TYPE_STRUCT && field.value.type.struct_def->fixed ) {
+            if (IsBuiltinStruct(field.value.type)) {
+              code_.SetValue("VARIANT_ENUM", GodotTypeEnum(field.value.type.struct_def->name) );
+              code_ += "and verify_vector_of_variant(verifier, {{OFFSET_NAME}}, {{VARIANT_ENUM}})";
+            } else {
+              code_.SetValue("STRUCT_SIZE", NumToString(field.value.type.struct_def->bytesize) ) ;
+              code_ += "and verify_vector(verifier, {{OFFSET_NAME}}, {{STRUCT_SIZE}}, {{REQUIRED}} )";
+            }
+          } else {
+            code_.SetValue("SCALAR_SUFFIX", gdPBASuffix(field.value.type.element));
+            code_ += "and verify_vector_{{SCALAR_SUFFIX}}(verifier, {{OFFSET_NAME}})";
+          }
         }
 
         switch (field.value.type.element) {
           case BASE_TYPE_STRING: {
-            code_ += "# TODO and verifier.verify_vector_of_strings({{NAME}}())";
+            code_ += "and verify_vector_of_variant(verifier, {{OFFSET_NAME}}, TYPE_STRING)";
             break;
           }
           case BASE_TYPE_STRUCT: {
