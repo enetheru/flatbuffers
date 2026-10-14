@@ -70,6 +70,27 @@ case BASE_TYPE_##ENUM: return PBASUFFIX;
   return "";
 }
 
+// One FlatBuffer call reads the vtable slot and the scalar. decode_* would
+// be a second call back into the engine for bytes this object already holds.
+inline const char *gdScalarRead(const BaseType t) {
+  switch (t) {
+    case BASE_TYPE_BOOL: return "get_bool";
+    case BASE_TYPE_UTYPE: return "get_u8";
+    case BASE_TYPE_CHAR: return "get_s8";
+    case BASE_TYPE_UCHAR: return "get_u8";
+    case BASE_TYPE_SHORT: return "get_s16";
+    case BASE_TYPE_USHORT: return "get_u16";
+    case BASE_TYPE_INT: return "get_s32";
+    case BASE_TYPE_UINT: return "get_u32";
+    case BASE_TYPE_LONG: return "get_s64";
+    case BASE_TYPE_ULONG: return "get_u64";
+    case BASE_TYPE_FLOAT: return "get_f32";
+    case BASE_TYPE_DOUBLE: return "get_f64";
+    default: FLATBUFFERS_ASSERT(0);
+  }
+  return "";
+}
+
 inline const char* gdPBAConvert(const BaseType t) {
   switch (t) {
 #define GODOT_TD(ENUM, IDLTYPE, CTYPE, GDTYPE, PBAS, PBAC, ...) \
@@ -2108,13 +2129,11 @@ public:
   void GenFieldScalar( const FieldDef &field ) {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
-    code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
+    code_.SetValue("SCALAR_READ", gdScalarRead(type.base_type));
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
-    code_ += "if not field_start: return " + field.value.constant;
-    code_ += "return _fb_bytes.decode_{{PBA_SUFFIX}}( field_start )";
+    code_ += "return {{SCALAR_READ}}( {{OFFSET_NAME}}, " + field.value.constant + " )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
@@ -2175,16 +2194,13 @@ public:
     code_.SetValue("GODOT_TYPE", GetGodotType(type));
     code_.SetValue("INCLUDE", IsIncluded(type) ? GetInclude(type) : "");
 
-    code_.SetValue("PBA_SUFFIX", gdPBASuffix(type.base_type));
+    code_.SetValue("SCALAR_READ", gdScalarRead(type.base_type));
     GenComment(field.doc_comment, "#");
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel(); {
-      code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
-      code_ += "if not field_start: return " + field.value.constant + " as {{GODOT_TYPE}}";
       //TODO The reflection.fbs uses the bitflags attribute for "AdvancedFeatures"
       // Which would trigger the output of this function to be expressed as int.
-      code_ += "var decoded: {{GODOT_TYPE}} = _fb_bytes.decode_{{PBA_SUFFIX}}( field_start )";
-      code_ += "return decoded";
+      code_ += "return {{SCALAR_READ}}( {{OFFSET_NAME}}, " + field.value.constant + " ) as {{GODOT_TYPE}}";
     } code_.DecrementIdentLevel();
     code_ += "";
   }
