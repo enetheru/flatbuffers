@@ -1276,8 +1276,11 @@ class GdscriptGenerator final : public BaseGenerator {
   ╙─────────────────────────────────────────────────────────────────*/
   void GenStructCreate(const StructDef &struct_def) {
     code_.SetValue("STRUCT_NAME", Name(struct_def));
-    GenComment({" Create a new {{STRUCT_NAME}} with the provided field values"},
-               "#");
+    GenComment(
+        {" Write the fields into [param into]. The empty constructor allocates",
+         " a staging buffer, so a reused struct avoids that. A null [param into]",
+         " still constructs one."},
+        "#");
     code_ += "static func create_{{STRUCT_NAME}}(";
     code_.IncrementIdentLevel();
     code_.IncrementIdentLevel();
@@ -1295,11 +1298,16 @@ class GdscriptGenerator final : public BaseGenerator {
       // TODO add default value if possible.
       add_sep = true;
     }
+    if (add_sep) code_ += "{{SEP}}";
+    code_ += "into: {{STRUCT_NAME}} = null\\";
     code_ += " ) -> {{STRUCT_NAME}} :";
     code_.DecrementIdentLevel();
 
-    // Allocate the memory required.
-    code_ += "var val: {{STRUCT_NAME}} = {{STRUCT_NAME}}.new()";
+    // The empty constructor allocates the staging PackedByteArray.
+    code_ += "if into == null:";
+    code_.IncrementIdentLevel();
+    code_ += "into = {{STRUCT_NAME}}.new()";
+    code_.DecrementIdentLevel();
 
     // for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) :
     // 1; size; size /= 2 ) {
@@ -1326,12 +1334,11 @@ class GdscriptGenerator final : public BaseGenerator {
             !field.deprecated && (!struct_def.sortbysize ||
                                   size == SizeOf(field.value.type.base_type))) {
           code_.SetValue("FIELD_NAME", Name(field));
-          code_ += "val.{{FIELD_NAME}} = _{{FIELD_NAME}};";
+          code_ += "into.{{FIELD_NAME}} = _{{FIELD_NAME}};";
         }
       }
     }
-    // FIXME assign all the values here.
-    code_ += "return val";
+    code_ += "return into";
     code_.DecrementIdentLevel();
     code_ += "";
   }
