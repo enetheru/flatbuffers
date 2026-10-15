@@ -1555,6 +1555,21 @@ class GdscriptGenerator final : public BaseGenerator {
         //  or a warning will show in the script.
         code_.DecrementIdentLevel();
         code_ += "";
+        // The property getter constructs. The nested struct is already inline
+        // at a fixed offset, so a reused reader only needs to be pointed there.
+        GenComment(
+            {" Point [param into] at this nested struct. It is inline at a",
+             " fixed offset, so this does not walk a vtable. The property",
+             " getter still constructs a reader."},
+            "#");
+        code_ +=
+            "func {{FIELD_NAME}}_into(into: {{INCLUDE}}{{GODOT_TYPE}}) -> "
+            "{{INCLUDE}}{{GODOT_TYPE}}:";
+        code_.IncrementIdentLevel();
+        code_ += "into.assign_buffer(_fb_bytes, _fb_start + {{OFFSET}})";
+        code_ += "return into";
+        code_.DecrementIdentLevel();
+        code_ += "";
       } else if (IsArray(type)) {
         const Type element = type.VectorType();
         code_.SetValue("ARRAY_SIZE", NumToString(InlineSize(type)));
@@ -2306,17 +2321,40 @@ class GdscriptGenerator final : public BaseGenerator {
     const auto &type = field.value.type;
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     GenComment(field.doc_comment, "#");
-    code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
-    code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
 
     if (IsBuiltinStruct(type)) {
+      code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
+      code_.IncrementIdentLevel();
+      code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
       code_ += "return decode_variant( field_start, {{VARIANT_TYPE}} )";
-    } else {
-      code_.SetValue("INCLUDE", GetInclude(type));
-      code_ += "if not field_start: return null";
-      code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
+      code_.DecrementIdentLevel();
+      code_ += "";
+      return;
     }
+
+    // A caller that already holds a reader should not construct another one,
+    // and should not come back to GDScript just to learn the offset.
+    code_.SetValue("INCLUDE", GetInclude(type));
+    GenComment(
+        {" Pass [param into] to reuse a reader. The offset stays in the",
+         " extension. A missing field leaves [param into] unchanged and",
+         " returns null."},
+        "#");
+    code_ +=
+        "func {{FIELD_NAME}}( into: {{INCLUDE}}{{GODOT_TYPE}} = null ) -> "
+        "{{INCLUDE}}{{GODOT_TYPE}}:";
+    code_.IncrementIdentLevel();
+    code_ += "if into == null:";
+    code_.IncrementIdentLevel();
+    code_ += "var field_start: int = get_inline_field_start( {{OFFSET_NAME}} )";
+    code_ += "if not field_start: return null";
+    code_ += "return {{INCLUDE}}{{GODOT_TYPE}}.new( _fb_bytes, field_start )";
+    code_.DecrementIdentLevel();
+    code_ += "if not read_inline_struct_into(into, {{OFFSET_NAME}}):";
+    code_.IncrementIdentLevel();
+    code_ += "return null";
+    code_.DecrementIdentLevel();
+    code_ += "return into";
     code_.DecrementIdentLevel();
     code_ += "";
   }
