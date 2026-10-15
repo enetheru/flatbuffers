@@ -1215,13 +1215,17 @@ class GdscriptGenerator final : public BaseGenerator {
         code_.SetValue("UNION_CLASS", Name(*val));
         code_.SetValue("UNION_LCCLASS", ConvertCase(Name(*val), Case::kSnake,
                                                     Case::kUpperCamel));
+        code_ += "{{ENUM_NAME}}.{{KEY}}:";
+        code_.IncrementIdentLevel();
         if (val->IsNonZero()) {
-          code_ += "{{ENUM_NAME}}.{{KEY}}:";
-          code_.IncrementIdentLevel();
           code_ += "var {{UNION_LCCLASS}}: {{UNION_CLASS}} = value";
           code_ += "return {{UNION_LCCLASS}}.verify(verifier)";
-          code_.DecrementIdentLevel();
+        } else {
+          // Discriminant 0 stores no value. An omitted union reads as this
+          // and must still verify. Anything else is an unknown type.
+          code_ += "return true";
         }
+        code_.DecrementIdentLevel();
       }
       code_.DecrementIdentLevel();
     }
@@ -1573,6 +1577,19 @@ class GdscriptGenerator final : public BaseGenerator {
         GenFieldDebug(*field);
       }
     }
+
+    // A struct is inline and has no vtable. Its nested fields sit inside this
+    // fixed span, so the hostile case is a buffer shorter than the struct.
+    GenComment(
+        {" Verify that this struct's fixed bytes lie inside the buffer."},
+        "#");
+    code_ += "func verify(verifier:FlatBufferVerifier) -> bool:";
+    code_.IncrementIdentLevel();
+    code_ += "verifier.set_buffer(_fb_bytes)";
+    code_ += "return _fb_bytes.size() >= _fb_start + _fb_struct_size";
+    code_.DecrementIdentLevel();
+    code_ += "";
+
     code_.DecrementIdentLevel();
     code_ += "";
   }
