@@ -1887,38 +1887,23 @@ class GdscriptGenerator final : public BaseGenerator {
     // GenFieldVector
 
     GenComment(field.doc_comment, "#");
+    GenComment(
+        {" The caller passes a present vector and an index inside it. The "
+         "element",
+         " offset stays in the extension so the read does not return to "
+         "GDScript."},
+        "#");
     code_ +=
         "func {{FIELD_NAME}}_at( idx: int, into: {{ELEMENT_TYPE}} = null ) -> "
         "{{ELEMENT_TYPE}}:";
     code_.IncrementIdentLevel();
     {
-      code_ +=
-          "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
-      code_ +=
-          "assert(field_start, 'Field \"{{FIELD_NAME}}\" is not present in "
-          "buffer' )\n";
-
-      code_ +=
-          "# The field is a vector of table, so the inline data is a vector of";
-      code_ += "# offsets to the element location.\n";
-
-      code_ += "var array_size: int = _fb_bytes.decode_u32( field_start )";
-      code_ += "assert( idx < array_size, 'index is out of bounds')\n";
-
-      code_ += "var array_start: int = field_start + 4";
-      code_ += "var element_pos: int = array_start + idx * {{ELEMENT_SIZE}}";
-      code_ += "var element_offset: int = _fb_bytes.decode_u32(element_pos)";
-      code_ += "if into:";
+      code_ += "if into == null:";
       code_.IncrementIdentLevel();
-      {
-        code_ += "into.assign_buffer(_fb_bytes, element_pos + element_offset)";
-        code_ += "return into";
-        code_.DecrementIdentLevel();
-      }
-      code_ +=
-          "return {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new( _fb_bytes, "
-          "element_pos + element_offset )";
-      ;
+      code_ += "into = {{ELEMENT_INCLUDE}}{{ELEMENT_TYPE}}.new()";
+      code_.DecrementIdentLevel();
+      code_ += "read_vector_table_into(into, {{OFFSET_NAME}}, idx)";
+      code_ += "return into";
       code_.DecrementIdentLevel();
     }
     code_ += "";
