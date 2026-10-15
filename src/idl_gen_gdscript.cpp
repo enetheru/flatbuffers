@@ -2268,9 +2268,7 @@ public:
     // Assumes that FIELD_NAME, GODOT_TYPE, INCLUDE are set
     code_ += "func {{FIELD_NAME}}() -> {{INCLUDE}}{{GODOT_TYPE}}:";
     code_.IncrementIdentLevel();
-    code_ += "var field_start: int = get_offset_field_start( {{OFFSET_NAME}} )";
-    code_ += "if not field_start: return ''";
-    code_ += "return decode_variant( field_start, TYPE_STRING )";
+    code_ += "return get_string( {{OFFSET_NAME}} )";
     code_.DecrementIdentLevel();
     code_ += "";
   }
