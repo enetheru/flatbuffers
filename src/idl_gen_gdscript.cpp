@@ -524,23 +524,28 @@ class GdscriptGenerator final : public BaseGenerator {
   ║|_|  |_\__,_| .__/___|_||_\__|_|\_,_\__,_\___||_| \_, | .__/\___/__/
   ╙────────────|_|───────────────────────────────────|__/|_|────────────*/
   void MapIncludedTypes() {
-    // resize the vector before putting things inside
-    include_defs.resize(parser_.GetIncludedFiles().size() + 1);
+    // include_fast and type_include keep pointers into this vector for the
+    // rest of generation. resize() already fills every slot, so the next
+    // emplace_back reallocates, and a further included file reallocates
+    // again. GetInclude then reads a freed gdIncludeDef. One include, such
+    // as godot.fbs, is enough. Reserve the final count and only append.
+    const size_t slots = parser_.GetIncludedFiles().size() + 1;
+    include_defs.reserve(slots);
 
     // add the current file as it wont be in the included list otherwise.
     std::string this_file = parser_.file_being_parsed_;
-    gdIncludeDef *this_def = &include_defs.emplace_back(gdIncludeDef{
+    include_defs.emplace_back(gdIncludeDef{
         strcat("_", StripExtension(StripPath(this_file)), "_schema"),
         strcat("'", StripExtension(StripPath(this_file)), "_generated.gd'")});
-    include_fast.emplace(this_file, this_def);
+    include_fast.emplace(this_file, &include_defs.back());
 
     // add the included files
     for (auto &[schema_name, filename] : parser_.GetIncludedFiles()) {
       if (include_fast.find(filename) == include_fast.end()) {
-        gdIncludeDef *new_def = &include_defs.emplace_back(gdIncludeDef{
+        include_defs.emplace_back(gdIncludeDef{
             strcat("_", StripExtension(StripPath(filename)), "_schema"),
             strcat("'", StripExtension(schema_name), "_generated.gd'")});
-        include_fast.emplace(filename, new_def);
+        include_fast.emplace(filename, &include_defs.back());
       }
     }
 
@@ -2545,7 +2550,9 @@ class GdscriptGenerator final : public BaseGenerator {
 
   // Init function to prevent a rather spicy footgun
   void GenTableInit(const StructDef &struct_def [[maybe_unused]]) {
-    GenComment({" Initialize the {{STRUCT_NAME}} with the provided [param "
+    // TABLE_NAME is set by GenTable. STRUCT_NAME is still unset on the first
+    // table, and a debug flatc aborts on the missing key.
+    GenComment({" Initialize the {{TABLE_NAME}} with the provided [param "
                 "packed_bytes] at the given [param offset]"},
                "#");
     code_ +=
@@ -2560,7 +2567,8 @@ class GdscriptGenerator final : public BaseGenerator {
   // MARK: GenTableVerifier
   //  Init function to prevent a rather spicy footgun
   void GenTableVerifier(const StructDef &struct_def) {
-    GenComment({" Verify the integrity of the {{STRUCT_NAME}} data"}, "#");
+    // Same missing-key abort as GenTableInit when this is the first table.
+    GenComment({" Verify the integrity of the {{TABLE_NAME}} data"}, "#");
     code_ += "func verify(verifier:FlatBufferVerifier) -> bool:";
     code_.IncrementIdentLevel();
     {
@@ -2996,6 +3004,64 @@ class GdscriptGenerator final : public BaseGenerator {
     code_ += "";
   }
 
+  const char *TableFieldKind(const BaseType t) const {
+    switch (t) {
+      case BASE_TYPE_BOOL: return "FIELD_BOOL";
+      case BASE_TYPE_CHAR: return "FIELD_BYTE";
+      case BASE_TYPE_UTYPE:
+      case BASE_TYPE_UCHAR: return "FIELD_UBYTE";
+      case BASE_TYPE_SHORT: return "FIELD_SHORT";
+      case BASE_TYPE_USHORT: return "FIELD_USHORT";
+      case BASE_TYPE_INT: return "FIELD_INT";
+      case BASE_TYPE_UINT: return "FIELD_UINT";
+      case BASE_TYPE_LONG: return "FIELD_LONG";
+      case BASE_TYPE_ULONG: return "FIELD_ULONG";
+      case BASE_TYPE_FLOAT: return "FIELD_FLOAT";
+      case BASE_TYPE_DOUBLE: return "FIELD_DOUBLE";
+      default: return nullptr;
+    }
+  }
+
+  // Matches the add_* branch in GenTableBuilder. A false result keeps the
+  // script builder, so a fixed array does not get a wrong native kind.
+  bool FillCreateSpec(const StructDef &table, const FieldDef &field,
+                      std::string &line, std::string &arg) {
+    const Type &type = field.value.type;
+    const char *kind = nullptr;
+    bool has_extra = false;
+    std::string extra;
+    if (IsUnion(type)) {
+      kind = IsScalar(type.base_type) ? TableFieldKind(type.base_type)
+                                      : "FIELD_OFFSET";
+    } else if (IsEnum(type)) {
+      kind = TableFieldKind(type.base_type);
+    } else if (field.IsScalar()) {
+      kind = TableFieldKind(type.base_type);
+      if (kind != nullptr && !field.IsScalarOptional()) {
+        has_extra = true;
+        extra = field.value.constant.empty() ? "0" : field.value.constant;
+      }
+    } else if (IsStruct(type)) {
+      if (IsBuiltinStruct(type)) {
+        kind = "FIELD_VARIANT";
+        has_extra = true;
+        extra = "TYPE_" + ConvertCase(GetGodotType(type), Case::kAllUpper);
+      } else {
+        kind = "FIELD_STRUCT";
+      }
+    } else if (IsTable(type) || IsString(type) || IsVector(type)) {
+      kind = "FIELD_OFFSET";
+    }
+    if (kind == nullptr) return false;
+    line = "[" + Name(table) + ".VT_" +
+           ConvertCase(Name(field), Case::kAllUpper) + ", FlatBufferBuilder." +
+           kind;
+    if (has_extra) line += ", " + extra;
+    line += "],";
+    arg = Name(field);
+    return true;
+  }
+
   /*MARK: Gen Create
   ║  ___             ___              _
   ║ / __|___ _ _    / __|_ _ ___ __ _| |_ ___
@@ -3003,9 +3069,66 @@ class GdscriptGenerator final : public BaseGenerator {
   ║ \___\___|_||_|  \___|_| \___\__,_|\__\___|
   ╙────────────────────────────────────────────*/
   void GenTableCreate(const StructDef &struct_def) {
-    // Generate a convenient create_<name> function that uses the above builder
-    // to create a table in one go.
+    // One native call, in the same add order as the script builder. A field
+    // this cannot describe keeps the builder so the bytes stay on the old path.
     code_.SetValue("TABLE_NAME", Name(struct_def));
+
+    struct Pending {
+      std::string line;
+      std::string arg;
+    };
+    std::vector<Pending> pending;
+    bool fused = true;
+    for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
+         size && fused; size /= 2) {
+      for (auto it = struct_def.fields.vec.rbegin();
+           it != struct_def.fields.vec.rend(); ++it) {
+        const FieldDef &field = **it;
+        if (field.deprecated) continue;
+        if (struct_def.sortbysize &&
+            size != SizeOf(field.value.type.base_type)) {
+          continue;
+        }
+        Pending item;
+        if (!FillCreateSpec(struct_def, field, item.line, item.arg)) {
+          fused = false;
+          break;
+        }
+        pending.push_back(std::move(item));
+      }
+    }
+
+    if (fused) {
+      GenComment(
+          {" One native call writes every field. A {{TABLE_NAME}}Builder",
+           " would construct a script object and cross back once per field."},
+          "#");
+      code_ += "const _CREATE_{{TABLE_NAME}}: Array = [";
+      if (!pending.empty()) {
+        code_.IncrementIdentLevel();
+        for (const Pending &item : pending) {
+          code_.SetValue("SPEC", item.line);
+          code_ += "{{SPEC}}";
+        }
+        code_.DecrementIdentLevel();
+      }
+      code_ += "]";
+      std::string required;
+      for (const auto &field : struct_def.fields.vec) {
+        if (field->deprecated || !field->IsRequired()) continue;
+        if (!required.empty()) required += ", ";
+        required += Name(struct_def) + ".VT_" +
+                    ConvertCase(Name(*field), Case::kAllUpper);
+      }
+      code_.SetValue("REQ", required);
+      // An Array literal is a constant expression. PackedInt32Array() is not.
+      if (required.empty()) {
+        code_ += "const _REQUIRED_{{TABLE_NAME}}: Array = []";
+      } else {
+        code_ += "const _REQUIRED_{{TABLE_NAME}}: Array = [{{REQ}}]";
+      }
+      code_ += "";
+    }
 
     GenComment({" Create a {{TABLE_NAME}} table in one go using the provided "
                 "[param _fbb]"},
@@ -3021,10 +3144,6 @@ class GdscriptGenerator final : public BaseGenerator {
       if (add_sep) code_ += "{{SEP}}";
       code_.SetValue("PARAM_NAME", Name(*field));
       code_.SetValue("DEFAULT_VALUE", "default");
-      // Scalar | Struct | Fixed length Array
-      // These items are added inline in the table, and do not require creating
-      // an offset ahead of time.
-
       code_.SetValue("INCLUDE", "");
       code_.SetValue("PARAM_TYPE", GetGodotType(type));
       if (IsScalar(type.base_type)) { /* no changes */
@@ -3034,45 +3153,47 @@ class GdscriptGenerator final : public BaseGenerator {
         code_.SetValue("PARAM_TYPE", "int");
       }
       code_ += "{{PARAM_NAME}}: {{INCLUDE}}{{PARAM_TYPE}}\\";
-      // TODO add default value if possible.
       add_sep = true;
     }
     code_ += " ) -> int :";
     code_.DecrementIdentLevel();
 
-    // for( size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) :
-    // 1; size; size /= 2 ) {
-    //   for( auto it = struct_def.fields.vec.rbegin(); it !=
-    //   struct_def.fields.vec.rend(); ++it ) {
-    //     const auto &field = **it;
-    //     if( not field.deprecated and ( not struct_def.sortbysize or size
-    //     == SizeOf( field.value.type.base_type )) ) {
-    //       if( not IsStruct( field.value.type ) ) continue;
-    //       // FIXME this might also include fixed sized arrays
-    //       code_.SetValue( "FIELD_NAME", Name( field ) );
-    //       code_ += "# Create {{FIELD_NAME}}";
-    //       code_ += "var {{FIELD_NAME}}_offset";
-    //     }
-    //   }
-    // }
-
-    // Create* function body
-    code_ +=
-        "var builder: {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( _fbb "
-        ");";
-    for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
-         size; size /= 2) {
-      for (auto it = struct_def.fields.vec.rbegin();
-           it != struct_def.fields.vec.rend(); ++it) {
-        if (const auto &field = **it;
-            !field.deprecated && (!struct_def.sortbysize ||
-                                  size == SizeOf(field.value.type.base_type))) {
-          code_.SetValue("FIELD_NAME", Name(field));
-          code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}} );";
+    if (fused) {
+      if (pending.empty()) {
+        code_ +=
+            "return _fbb.create_table( _CREATE_{{TABLE_NAME}}, "
+            "_REQUIRED_{{TABLE_NAME}} )";
+      } else {
+        code_ += "return _fbb.create_table( \\";
+        code_ += "_CREATE_{{TABLE_NAME}}, _REQUIRED_{{TABLE_NAME}}, \\";
+        for (size_t i = 0; i < pending.size(); ++i) {
+          code_.SetValue("ARG", pending[i].arg);
+          if (i + 1 == pending.size()) {
+            code_ += "{{ARG}} )";
+          } else {
+            code_ += "{{ARG}}, \\";
+          }
         }
       }
+    } else {
+      code_ +=
+          "var builder: {{TABLE_NAME}}Builder = {{TABLE_NAME}}Builder.new( "
+          "_fbb );";
+      for (size_t size = struct_def.sortbysize ? sizeof(largest_scalar_t) : 1;
+           size; size /= 2) {
+        for (auto it = struct_def.fields.vec.rbegin();
+             it != struct_def.fields.vec.rend(); ++it) {
+          if (const auto &field = **it;
+              !field.deprecated &&
+                  (!struct_def.sortbysize ||
+                   size == SizeOf(field.value.type.base_type))) {
+            code_.SetValue("FIELD_NAME", Name(field));
+            code_ += "builder.add_{{FIELD_NAME}}( {{FIELD_NAME}} );";
+          }
+        }
+      }
+      code_ += "return builder.finish();";
     }
-    code_ += "return builder.finish();";
     code_.DecrementIdentLevel();
     code_ += "";
   }
